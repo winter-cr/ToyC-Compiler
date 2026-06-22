@@ -1,0 +1,10 @@
+tests/basic/return_0.tc	0
+tests/basic/return_7.tc	7
+tests/basic/return_negative_expr.tc	1
+tests/basic/local_var.tc	5
+tests/basic/const_expr.tc	5
+tests/basic/if_else.tc	3
+tests/basic/while_loop.tc	3
+tests/basic/function_call.tc	7
+tests/basic/global_var.tc	6
+tests/basic/short_circuit.tc	8
