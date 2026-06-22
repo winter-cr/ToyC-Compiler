@@ -1,0 +1,7 @@
+// 非法测试7: 常量表达式除零
+// 目标：应报错 SEM_DIVIDE_BY_ZERO
+const int A = 10 / 0;  // 除零
+
+int main(void) {
+    return 0;
+}
