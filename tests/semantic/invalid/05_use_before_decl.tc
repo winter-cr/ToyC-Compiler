@@ -1,0 +1,7 @@
+// 非法测试5: 使用在声明之前（同一个作用域）
+// 目标：应报错 SEM_USE_BEFORE_DECL
+int main(void) {
+    x = 5;  // x未声明
+    int x;  // 声明在使用之后
+    return x;
+}
