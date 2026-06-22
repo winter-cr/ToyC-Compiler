@@ -51,7 +51,67 @@ const Token& Parser::consume(TokenType type, const char* message) {
     if (check(type)) {
         return advance();
     }
-    throw ParseError(message, current_loc());
+    report_error(message, current_loc());
+    if (type == TokenType::SEMICOLON) {
+        recover_semicolon();
+    } else if (type == TokenType::RBRACE || type == TokenType::RPAREN) {
+        recover_to(type);
+    } else if (!is_at_end()) {
+        advance();
+    }
+    if (check(type)) {
+        return advance();
+    }
+    static Token placeholder(type, "", 0, 0);
+    return placeholder;
+}
+
+void Parser::report_error(const char* message, SourceLocation loc) {
+    errors_.emplace_back(message, loc);
+}
+
+void Parser::recover_to(TokenType type) {
+    while (!is_at_end()) {
+        if (peek().type == type) {
+            return;
+        }
+        advance();
+    }
+}
+
+void Parser::recover_semicolon() {
+    while (!is_at_end()) {
+        switch (peek().type) {
+        case TokenType::SEMICOLON:
+        case TokenType::RBRACE:
+            return;
+        case TokenType::KW_CONST:
+        case TokenType::KW_INT:
+        case TokenType::KW_IF:
+        case TokenType::KW_WHILE:
+        case TokenType::KW_BREAK:
+        case TokenType::KW_CONTINUE:
+        case TokenType::KW_RETURN:
+        case TokenType::LBRACE:
+        case TokenType::IDENT:
+            return;
+        default:
+            advance();
+        }
+    }
+}
+
+void Parser::synchronize_top_level() {
+    while (!is_at_end()) {
+        switch (peek().type) {
+        case TokenType::KW_CONST:
+        case TokenType::KW_INT:
+        case TokenType::KW_VOID:
+            return;
+        default:
+            advance();
+        }
+    }
 }
 
 SourceLocation Parser::current_loc() const {
@@ -87,12 +147,22 @@ TopLevelItem Parser::parse_top_level_item() {
             return parse_func_def(FuncReturnType::Int);
         }
         if (!check(TokenType::ASSIGN)) {
-            throw ParseError("expected '=' or '(' after identifier in declaration", current_loc());
+            report_error("expected '=' or '(' after identifier in declaration", current_loc());
+            synchronize_top_level();
+            return make_error_var_decl();
         }
         current_ -= 2;
         return parse_var_decl();
     }
-    throw ParseError("expected top-level declaration or function definition", current_loc());
+    report_error("expected top-level declaration or function definition", current_loc());
+    synchronize_top_level();
+    return make_error_var_decl();
+}
+
+TopLevelItem Parser::make_error_var_decl() {
+    SourceLocation loc = current_loc();
+    auto init = std::make_unique<IntLiteral>(loc, 0);
+    return std::make_unique<VarDecl>(loc, "__error__", std::move(init));
 }
 
 std::unique_ptr<VarDecl> Parser::parse_var_decl() {
@@ -403,5 +473,6 @@ std::unique_ptr<Expr> Parser::parse_primary_expr() {
         consume(TokenType::RPAREN, "expected ')' after expression");
         return expr;
     }
-    throw ParseError("expected expression", current_loc());
+    report_error("expected expression", current_loc());
+    return std::make_unique<IntLiteral>(SourceLocation{loc.line, loc.column}, 0);
 }

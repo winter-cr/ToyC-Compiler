@@ -106,7 +106,7 @@ void Lexer::block_comment() {
         }
         advance();
     }
-    throw LexError("unterminated block comment", {line_, column_});
+    report_error("unterminated block comment", {line_, column_});
 }
 
 void Lexer::scan_token() {
@@ -182,7 +182,7 @@ void Lexer::scan_token() {
         if (match('&')) {
             tokens_.push_back(make_token(TokenType::AND_AND, "&&"));
         } else {
-            throw LexError(
+            report_error(
                 "invalid operator '&' (use '&&' for logical and)",
                 {token_start_line_, token_start_column_});
         }
@@ -191,7 +191,7 @@ void Lexer::scan_token() {
         if (match('|')) {
             tokens_.push_back(make_token(TokenType::OR_OR, "||"));
         } else {
-            throw LexError(
+            report_error(
                 "invalid operator '|' (use '||' for logical or)",
                 {token_start_line_, token_start_column_});
         }
@@ -217,13 +217,17 @@ void Lexer::scan_token() {
         return;
     }
 
-    throw LexError(
+    report_error(
         "unexpected character '" + std::string(1, c) + "'",
         {token_start_line_, token_start_column_});
 }
 
 Token Lexer::make_token(TokenType type, std::string lexeme, int64_t int_value) const {
     return Token(type, std::move(lexeme), token_start_line_, token_start_column_, int_value);
+}
+
+void Lexer::report_error(const std::string& message, LexLocation loc) {
+    errors_.emplace_back(message, loc);
 }
 
 void Lexer::identifier() {
@@ -238,9 +242,10 @@ void Lexer::identifier() {
             advance();
         }
         const std::string bad = source_.substr(start, current_ - start);
-        throw LexError(
+        report_error(
             "invalid identifier '" + bad + "': identifier cannot contain '-'",
             {token_start_line_, token_start_column_});
+        return;
     }
 
     const std::string text = source_.substr(start, current_ - start);
@@ -290,15 +295,17 @@ void Lexer::number(bool has_leading_minus) {
                 }
             }
             const std::string bad = source_.substr(start, current_ - start);
-            throw LexError(
+            report_error(
                 "invalid number '" + bad + "': leading zeros are not allowed",
                 {token_start_line_, token_start_column_});
+            return;
         }
     } else {
         if (std::isdigit(static_cast<unsigned char>(peek())) == 0) {
-            throw LexError(
+            report_error(
                 "invalid number",
                 {token_start_line_, token_start_column_});
+            return;
         }
         while (std::isdigit(static_cast<unsigned char>(peek())) != 0) {
             advance();
@@ -310,9 +317,10 @@ void Lexer::number(bool has_leading_minus) {
             advance();
         }
         const std::string bad = source_.substr(start, current_ - start);
-        throw LexError(
+        report_error(
             "invalid token '" + bad + "': identifier cannot start with a digit",
             {token_start_line_, token_start_column_});
+        return;
     }
 
     const std::string text = source_.substr(start, current_ - start);

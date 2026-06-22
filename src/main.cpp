@@ -53,6 +53,19 @@ int main(int argc, char* argv[]) {
         Parser parser(lexer.tokens());
         std::unique_ptr<CompUnit> ast = parser.parse();
 
+        bool failed = false;
+        for (const LexError& error : lexer.errors()) {
+            std::cerr << "lexical error: " << error.what() << '\n';
+            failed = true;
+        }
+        for (const ParseError& error : parser.errors()) {
+            std::cerr << "parse error: " << error.what() << '\n';
+            failed = true;
+        }
+        if (failed) {
+            return 1;
+        }
+
         if (env_enabled("TOYC_DUMP_AST")) {
             AstPrinter printer(std::cerr);
             printer.print(*ast);
@@ -60,12 +73,6 @@ int main(int argc, char* argv[]) {
 
         // 语义分析与代码生成由其他模块负责；前端阶段暂不输出汇编。
         std::cout << "// ToyC frontend: parse succeeded\n";
-    } catch (const LexError& error) {
-        std::cerr << "lexical error: " << error.what() << '\n';
-        return 1;
-    } catch (const ParseError& error) {
-        std::cerr << "parse error: " << error.what() << '\n';
-        return 1;
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';
         return 1;

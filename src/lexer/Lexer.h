@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lexer/LexError.h"
 #include "lexer/Token.h"
 
 #include <string>
@@ -10,6 +11,8 @@ public:
     explicit Lexer(std::string source);
 
     const std::vector<Token>& tokens() const { return tokens_; }
+    const std::vector<LexError>& errors() const { return errors_; }
+    bool has_errors() const { return !errors_.empty(); }
 
 private:
     bool is_at_end() const;
@@ -22,7 +25,7 @@ private:
     void scan_token();
 
     Token make_token(TokenType type, std::string lexeme, int64_t int_value = 0) const;
-    Token error_token(const std::string& message) const;
+    void report_error(const std::string& message, LexLocation loc);
 
     TokenType identifier_type(const std::string& text) const;
     bool allows_unary_minus_before_number() const;
@@ -37,4 +40,5 @@ private:
     int token_start_line_ = 1;
     int token_start_column_ = 1;
     std::vector<Token> tokens_;
+    std::vector<LexError> errors_;
 };

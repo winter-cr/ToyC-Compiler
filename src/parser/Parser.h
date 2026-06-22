@@ -29,6 +29,8 @@ public:
     explicit Parser(const std::vector<Token>& tokens);
 
     std::unique_ptr<CompUnit> parse();
+    const std::vector<ParseError>& errors() const { return errors_; }
+    bool has_errors() const { return !errors_.empty(); }
 
 private:
     bool is_at_end() const;
@@ -38,6 +40,11 @@ private:
     bool check(TokenType type) const;
     bool match(TokenType type);
     const Token& consume(TokenType type, const char* message);
+
+    void report_error(const char* message, SourceLocation loc);
+    void recover_to(TokenType type);
+    void recover_semicolon();
+    void synchronize_top_level();
 
     SourceLocation current_loc() const;
     SourceLocation previous_loc() const;
@@ -63,6 +70,9 @@ private:
     std::unique_ptr<Expr> parse_unary_expr();
     std::unique_ptr<Expr> parse_primary_expr();
 
+    TopLevelItem make_error_var_decl();
+
     const std::vector<Token>& tokens_;
     size_t current_ = 0;
+    std::vector<ParseError> errors_;
 };
