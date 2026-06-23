@@ -32,6 +32,7 @@ public:
     const std::unordered_map<std::string, std::unique_ptr<Symbol>>& currentScopeSymbols() const;
 
     // 重置（用于多次分析）
+    void clear();
     void reset();
 
 private:

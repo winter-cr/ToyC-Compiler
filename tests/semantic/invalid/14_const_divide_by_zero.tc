@@ -1,0 +1,7 @@
+// 非法测试14: 除零常量表达式（全局常量）
+// 目标：应报错 SEM_CONST_INIT_UNDEFINED 或专门的除零错误
+const int A = 1 / 0;  // 编译期除零
+
+int main(void) {
+    return A;
+}

@@ -1,0 +1,6 @@
+// 非法测试13: continue语句不在循环内
+// 目标：应报错 SEM_CONTINUE_OUTSIDE_LOOP
+int main(void) {
+    continue;  // continue必须位于循环内
+    return 0;
+}

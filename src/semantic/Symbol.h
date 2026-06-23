@@ -2,6 +2,10 @@
 
 #include <string>
 #include <optional>
+#include <vector>
+#include <memory>
+#include <unordered_map>
+#include <utility>  // for std::pair
 
 // 前向声明 - AST节点由A定义
 namespace ast {
@@ -51,7 +55,10 @@ enum class SemanticErrorCode {
     ERR_CONTINUE_OUTSIDE_LOOP,
 
     // 其他
-    ERR_DIVIDE_BY_ZERO
+    ERR_DIVIDE_BY_ZERO,
+
+    // 内部使用：表示没有错误
+    ERR_OK
 };
 
 // 语义错误信息结构
@@ -78,12 +85,25 @@ public:
     bool isGlobal;              // 是否全局符号
     bool isUsed;                // 死变量检测用（D模块使用）
 
+    // 函数特有字段（仅当kind==FUNCTION时有效）
+    std::vector<std::pair<std::string, BasicType>> params;  // 参数列表（名称, 类型）
+    BasicType returnType;        // 函数返回类型
+
     Symbol(SymbolKind k, std::string n, BasicType t, bool is_const, int l)
         : kind(k), name(std::move(n)), type(t), isConst(is_const), line(l),
-          offset(-1), isGlobal(false), isUsed(false) {
+          offset(-1), isGlobal(false), isUsed(false), returnType(t) {
         if (isConst) {
             constValue = std::nullopt;  // 初始化时未知，求值后填充
         }
+    }
+
+    // 辅助构造函数：用于函数符号
+    static std::unique_ptr<Symbol> createFunction(std::string n, BasicType ret_type,
+                                                  std::vector<std::pair<std::string, BasicType>> params, int line) {
+        auto sym = std::unique_ptr<Symbol>(new Symbol(SymbolKind::FUNCTION, std::move(n), BasicType::INT, false, line));
+        sym->returnType = ret_type;
+        sym->params = std::move(params);
+        return sym;
     }
 
     // 判断是否为常量（供优化使用）
@@ -93,6 +113,11 @@ public:
     std::optional<int> getConstValue() const {
         return isConst ? constValue : std::nullopt;
     }
+
+    // 函数相关查询
+    bool isFunction() const { return kind == SymbolKind::FUNCTION; }
+    const std::vector<std::pair<std::string, BasicType>>& getParams() const { return params; }
+    BasicType getReturnType() const { return returnType; }
 };
 
 // 作用域层级
@@ -103,4 +128,4 @@ struct Scope {
     explicit Scope(int l) : level(l) {}
 };
 
-}  // namespace semantic
+
