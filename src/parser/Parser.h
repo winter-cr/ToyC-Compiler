@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ast/CompUnit.h"
+#include "ast/Type.h"
 #include "lexer/Token.h"
 
 #include <memory>
@@ -51,9 +52,9 @@ private:
 
     std::unique_ptr<CompUnit> parse_comp_unit();
     TopLevelItem parse_top_level_item();
-    std::unique_ptr<VarDecl> parse_var_decl();
-    std::unique_ptr<ConstDecl> parse_const_decl();
-    std::unique_ptr<FuncDef> parse_func_def(FuncReturnType return_type);
+    std::unique_ptr<VarDecl> parse_var_decl(bool is_global);
+    std::unique_ptr<ConstDecl> parse_const_decl(bool is_global);
+    std::unique_ptr<FuncDef> parse_func_def(Type* return_type);
     std::unique_ptr<Param> parse_param();
     std::unique_ptr<BlockStmt> parse_block();
     std::unique_ptr<Stmt> parse_stmt();

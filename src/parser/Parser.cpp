@@ -4,8 +4,17 @@
 #include "ast/Expr.h"
 #include "ast/FuncDef.h"
 #include "ast/Stmt.h"
+#include "ast/Type.h"
 
 #include <utility>
+
+namespace {
+
+void set_int_type(Expr& expr) {
+    expr.set_type(Type::intType());
+}
+
+} // namespace
 
 Parser::Parser(const std::vector<Token>& tokens) : tokens_(tokens) {}
 
@@ -134,17 +143,17 @@ std::unique_ptr<CompUnit> Parser::parse_comp_unit() {
 
 TopLevelItem Parser::parse_top_level_item() {
     if (check(TokenType::KW_CONST)) {
-        return parse_const_decl();
+        return parse_const_decl(true);
     }
     if (check(TokenType::KW_VOID)) {
-        return parse_func_def(FuncReturnType::Void);
+        return parse_func_def(Type::voidType());
     }
     if (check(TokenType::KW_INT)) {
         advance();
         consume(TokenType::IDENT, "expected identifier after 'int'");
         if (check(TokenType::LPAREN)) {
             current_ -= 2;
-            return parse_func_def(FuncReturnType::Int);
+            return parse_func_def(Type::intType());
         }
         if (!check(TokenType::ASSIGN)) {
             report_error("expected '=' or '(' after identifier in declaration", current_loc());
@@ -152,7 +161,7 @@ TopLevelItem Parser::parse_top_level_item() {
             return make_error_var_decl();
         }
         current_ -= 2;
-        return parse_var_decl();
+        return parse_var_decl(true);
     }
     report_error("expected top-level declaration or function definition", current_loc());
     synchronize_top_level();
@@ -162,10 +171,10 @@ TopLevelItem Parser::parse_top_level_item() {
 TopLevelItem Parser::make_error_var_decl() {
     SourceLocation loc = current_loc();
     auto init = std::make_unique<IntLiteral>(loc, 0);
-    return std::make_unique<VarDecl>(loc, "__error__", std::move(init));
+    return std::make_unique<VarDecl>(loc, "__error__", std::move(init), true);
 }
 
-std::unique_ptr<VarDecl> Parser::parse_var_decl() {
+std::unique_ptr<VarDecl> Parser::parse_var_decl(bool is_global) {
     SourceLocation loc = current_loc();
     consume(TokenType::KW_INT, "expected 'int'");
     const Token& name = consume(TokenType::IDENT, "expected identifier");
@@ -173,10 +182,10 @@ std::unique_ptr<VarDecl> Parser::parse_var_decl() {
     std::unique_ptr<Expr> init = parse_expr();
     consume(TokenType::SEMICOLON, "expected ';' after variable declaration");
     return std::make_unique<VarDecl>(
-        SourceLocation{loc.line, loc.column}, name.lexeme, std::move(init));
+        SourceLocation{loc.line, loc.column}, name.lexeme, std::move(init), is_global);
 }
 
-std::unique_ptr<ConstDecl> Parser::parse_const_decl() {
+std::unique_ptr<ConstDecl> Parser::parse_const_decl(bool is_global) {
     SourceLocation loc = current_loc();
     consume(TokenType::KW_CONST, "expected 'const'");
     consume(TokenType::KW_INT, "expected 'int' after 'const'");
@@ -185,12 +194,12 @@ std::unique_ptr<ConstDecl> Parser::parse_const_decl() {
     std::unique_ptr<Expr> init = parse_expr();
     consume(TokenType::SEMICOLON, "expected ';' after constant declaration");
     return std::make_unique<ConstDecl>(
-        SourceLocation{loc.line, loc.column}, name.lexeme, std::move(init));
+        SourceLocation{loc.line, loc.column}, name.lexeme, std::move(init), is_global);
 }
 
-std::unique_ptr<FuncDef> Parser::parse_func_def(FuncReturnType return_type) {
+std::unique_ptr<FuncDef> Parser::parse_func_def(Type* return_type) {
     SourceLocation loc = current_loc();
-    if (return_type == FuncReturnType::Int) {
+    if (return_type->is_int()) {
         consume(TokenType::KW_INT, "expected 'int'");
     } else {
         consume(TokenType::KW_VOID, "expected 'void'");
@@ -243,12 +252,12 @@ std::unique_ptr<Stmt> Parser::parse_stmt() {
     }
     if (check(TokenType::KW_CONST)) {
         SourceLocation loc = current_loc();
-        auto decl = parse_const_decl();
+        auto decl = parse_const_decl(false);
         return std::make_unique<DeclStmt>(loc, std::move(decl));
     }
     if (check(TokenType::KW_INT)) {
         SourceLocation loc = current_loc();
-        auto decl = parse_var_decl();
+        auto decl = parse_var_decl(false);
         return std::make_unique<DeclStmt>(loc, std::move(decl));
     }
     if (check(TokenType::KW_IF)) {
@@ -279,13 +288,18 @@ std::unique_ptr<Stmt> Parser::parse_stmt() {
             advance();
             std::unique_ptr<Expr> value = parse_expr();
             consume(TokenType::SEMICOLON, "expected ';' after assignment");
+            auto lvalue = std::make_unique<IdentifierExpr>(
+                SourceLocation{name.line, name.column}, name.lexeme);
             return std::make_unique<AssignStmt>(
-                SourceLocation{loc.line, loc.column}, name.lexeme, std::move(value));
+                SourceLocation{loc.line, loc.column}, std::move(lvalue), std::move(value));
         }
     }
 
     SourceLocation loc = current_loc();
     std::unique_ptr<Expr> expr = parse_expr();
+    if (auto* call = dynamic_cast<CallExpr*>(expr.get())) {
+        call->set_is_statement(true);
+    }
     consume(TokenType::SEMICOLON, "expected ';' after expression");
     return std::make_unique<ExprStmt>(SourceLocation{loc.line, loc.column}, std::move(expr));
 }
@@ -339,8 +353,10 @@ std::unique_ptr<Expr> Parser::parse_lor_expr() {
     std::unique_ptr<Expr> expr = parse_land_expr();
     while (match(TokenType::OR_OR)) {
         std::unique_ptr<Expr> rhs = parse_land_expr();
-        expr = std::make_unique<BinaryExpr>(
+        auto node = std::make_unique<BinaryExpr>(
             SourceLocation{loc.line, loc.column}, BinaryOp::Or, std::move(expr), std::move(rhs));
+        set_int_type(*node);
+        expr = std::move(node);
         loc = current_loc();
     }
     return expr;
@@ -351,8 +367,10 @@ std::unique_ptr<Expr> Parser::parse_land_expr() {
     std::unique_ptr<Expr> expr = parse_rel_expr();
     while (match(TokenType::AND_AND)) {
         std::unique_ptr<Expr> rhs = parse_rel_expr();
-        expr = std::make_unique<BinaryExpr>(
+        auto node = std::make_unique<BinaryExpr>(
             SourceLocation{loc.line, loc.column}, BinaryOp::And, std::move(expr), std::move(rhs));
+        set_int_type(*node);
+        expr = std::move(node);
         loc = current_loc();
     }
     return expr;
@@ -379,8 +397,10 @@ std::unique_ptr<Expr> Parser::parse_rel_expr() {
             break;
         }
         std::unique_ptr<Expr> rhs = parse_add_expr();
-        expr = std::make_unique<BinaryExpr>(
+        auto node = std::make_unique<BinaryExpr>(
             SourceLocation{loc.line, loc.column}, op, std::move(expr), std::move(rhs));
+        set_int_type(*node);
+        expr = std::move(node);
         loc = current_loc();
     }
     return expr;
@@ -399,8 +419,10 @@ std::unique_ptr<Expr> Parser::parse_add_expr() {
             break;
         }
         std::unique_ptr<Expr> rhs = parse_mul_expr();
-        expr = std::make_unique<BinaryExpr>(
+        auto node = std::make_unique<BinaryExpr>(
             SourceLocation{loc.line, loc.column}, op, std::move(expr), std::move(rhs));
+        set_int_type(*node);
+        expr = std::move(node);
         loc = current_loc();
     }
     return expr;
@@ -421,8 +443,10 @@ std::unique_ptr<Expr> Parser::parse_mul_expr() {
             break;
         }
         std::unique_ptr<Expr> rhs = parse_unary_expr();
-        expr = std::make_unique<BinaryExpr>(
+        auto node = std::make_unique<BinaryExpr>(
             SourceLocation{loc.line, loc.column}, op, std::move(expr), std::move(rhs));
+        set_int_type(*node);
+        expr = std::move(node);
         loc = current_loc();
     }
     return expr;
@@ -431,16 +455,22 @@ std::unique_ptr<Expr> Parser::parse_mul_expr() {
 std::unique_ptr<Expr> Parser::parse_unary_expr() {
     SourceLocation loc = current_loc();
     if (match(TokenType::PLUS)) {
-        return std::make_unique<UnaryExpr>(
+        auto node = std::make_unique<UnaryExpr>(
             SourceLocation{loc.line, loc.column}, UnaryOp::Plus, parse_unary_expr());
+        set_int_type(*node);
+        return node;
     }
     if (match(TokenType::MINUS)) {
-        return std::make_unique<UnaryExpr>(
+        auto node = std::make_unique<UnaryExpr>(
             SourceLocation{loc.line, loc.column}, UnaryOp::Minus, parse_unary_expr());
+        set_int_type(*node);
+        return node;
     }
     if (match(TokenType::BANG)) {
-        return std::make_unique<UnaryExpr>(
+        auto node = std::make_unique<UnaryExpr>(
             SourceLocation{loc.line, loc.column}, UnaryOp::Not, parse_unary_expr());
+        set_int_type(*node);
+        return node;
     }
     return parse_primary_expr();
 }
@@ -463,7 +493,7 @@ std::unique_ptr<Expr> Parser::parse_primary_expr() {
             }
             consume(TokenType::RPAREN, "expected ')' after arguments");
             return std::make_unique<CallExpr>(
-                SourceLocation{loc.line, loc.column}, name.lexeme, std::move(args));
+                SourceLocation{loc.line, loc.column}, name.lexeme, std::move(args), false);
         }
         return std::make_unique<IdentifierExpr>(
             SourceLocation{name.line, name.column}, name.lexeme);

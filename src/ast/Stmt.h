@@ -49,16 +49,19 @@ private:
 
 class AssignStmt : public Stmt {
 public:
-    AssignStmt(SourceLocation loc, std::string name, std::unique_ptr<Expr> value)
-        : Stmt(AstNodeKind::AssignStmt, loc), name_(std::move(name)), value_(std::move(value)) {}
+    AssignStmt(SourceLocation loc, std::unique_ptr<IdentifierExpr> lvalue, std::unique_ptr<Expr> value)
+        : Stmt(AstNodeKind::AssignStmt, loc),
+          lvalue_(std::move(lvalue)),
+          value_(std::move(value)) {}
 
-    const std::string& name() const { return name_; }
+    const IdentifierExpr& lvalue() const { return *lvalue_; }
+    const std::string& name() const { return lvalue_->name(); }
     const Expr& value() const { return *value_; }
 
     void accept(AstVisitor& visitor) const override;
 
 private:
-    std::string name_;
+    std::unique_ptr<IdentifierExpr> lvalue_;
     std::unique_ptr<Expr> value_;
 };
 

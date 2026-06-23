@@ -9,6 +9,7 @@ add_executable(toyc
     src/main.cpp
     src/lexer/Token.cpp
     src/lexer/Lexer.cpp
+    src/ast/Type.cpp
     src/ast/Expr.cpp
     src/ast/Decl.cpp
     src/ast/Stmt.cpp

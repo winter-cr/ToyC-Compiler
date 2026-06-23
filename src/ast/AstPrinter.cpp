@@ -24,7 +24,7 @@ void AstPrinter::visit(const CompUnit& node) {
 }
 
 void AstPrinter::visit(const VarDecl& node) {
-    out_ << "VarDecl " << node.name() << "\n";
+    out_ << "VarDecl " << node.name() << (node.is_global() ? " global" : " local") << "\n";
     push();
     indent();
     node.init().accept(*this);
@@ -32,7 +32,7 @@ void AstPrinter::visit(const VarDecl& node) {
 }
 
 void AstPrinter::visit(const ConstDecl& node) {
-    out_ << "ConstDecl " << node.name() << "\n";
+    out_ << "ConstDecl " << node.name() << (node.is_global() ? " global" : " local") << "\n";
     push();
     indent();
     node.init().accept(*this);
@@ -40,9 +40,7 @@ void AstPrinter::visit(const ConstDecl& node) {
 }
 
 void AstPrinter::visit(const FuncDef& node) {
-    out_ << "FuncDef "
-         << (node.return_type() == FuncReturnType::Int ? "int" : "void") << " "
-         << node.name() << "\n";
+    out_ << "FuncDef " << node.return_type()->name() << " " << node.name() << "\n";
     push();
     for (const auto& param : node.params()) {
         indent();
@@ -80,8 +78,10 @@ void AstPrinter::visit(const ExprStmt& node) {
 }
 
 void AstPrinter::visit(const AssignStmt& node) {
-    out_ << "Assign " << node.name() << "\n";
+    out_ << "Assign\n";
     push();
+    indent();
+    node.lvalue().accept(*this);
     indent();
     node.value().accept(*this);
     pop();
@@ -184,7 +184,7 @@ void AstPrinter::visit(const IdentifierExpr& node) {
 }
 
 void AstPrinter::visit(const CallExpr& node) {
-    out_ << "Call " << node.name() << "\n";
+    out_ << "Call " << node.name() << (node.is_statement() ? " stmt" : "") << "\n";
     push();
     for (const auto& arg : node.args()) {
         indent();

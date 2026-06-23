@@ -43,6 +43,8 @@ public:
 
     AstNodeKind kind() const { return kind_; }
     const SourceLocation& location() const { return loc_; }
+    int line() const { return loc_.line; }
+    int column() const { return loc_.column; }
 
     virtual void accept(AstVisitor& visitor) const = 0;
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ast/AstNode.h"
+#include "ast/Type.h"
 
 #include <cstdint>
 #include <memory>
@@ -32,8 +33,16 @@ enum class UnaryOp {
 };
 
 class Expr : public AstNode {
+public:
+    Type* type() const { return type_; }
+    void set_type(Type* type) { type_ = type; }
+
 protected:
-    explicit Expr(AstNodeKind kind, SourceLocation loc) : AstNode(kind, loc) {}
+    explicit Expr(AstNodeKind kind, SourceLocation loc, Type* type = nullptr)
+        : AstNode(kind, loc), type_(type) {}
+
+private:
+    Type* type_ = nullptr;
 };
 
 class BinaryExpr : public Expr {
@@ -71,7 +80,7 @@ private:
 class IntLiteral : public Expr {
 public:
     IntLiteral(SourceLocation loc, int64_t value)
-        : Expr(AstNodeKind::IntLiteral, loc), value_(value) {}
+        : Expr(AstNodeKind::IntLiteral, loc, Type::intType()), value_(value) {}
 
     int64_t value() const { return value_; }
 
@@ -96,17 +105,26 @@ private:
 
 class CallExpr : public Expr {
 public:
-    CallExpr(SourceLocation loc, std::string name, std::vector<std::unique_ptr<Expr>> args)
-        : Expr(AstNodeKind::CallExpr, loc), name_(std::move(name)), args_(std::move(args)) {}
+    CallExpr(SourceLocation loc,
+             std::string name,
+             std::vector<std::unique_ptr<Expr>> args,
+             bool is_statement = false)
+        : Expr(AstNodeKind::CallExpr, loc),
+          name_(std::move(name)),
+          args_(std::move(args)),
+          is_statement_(is_statement) {}
 
     const std::string& name() const { return name_; }
     const std::vector<std::unique_ptr<Expr>>& args() const { return args_; }
+    bool is_statement() const { return is_statement_; }
+    void set_is_statement(bool is_statement) { is_statement_ = is_statement; }
 
     void accept(AstVisitor& visitor) const override;
 
 private:
     std::string name_;
     std::vector<std::unique_ptr<Expr>> args_;
+    bool is_statement_ = false;
 };
 
 const char* binary_op_name(BinaryOp op);
