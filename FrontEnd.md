@@ -1,6 +1,6 @@
 # ToyC 编译器前端说明
 
-成员 A 负责的前端模块：词法分析、语法分析、AST 构建与调试输出。当前分支 `feature/frontend` 已完成 ToyC 全部语法的解析，输出 AST 供语义分析与代码生成使用。
+成员 A 负责的前端模块：词法分析、语法分析、AST 构建与调试输出。当前分支 `feature/frontend` 已完成 ToyC 全部语法的解析，并输出**语义分析就绪**的 AST，供成员 B/C 使用。
 
 ---
 
@@ -10,10 +10,10 @@
 |------|------|
 | `src/lexer/` | 将 ToyC 源码扫描为带位置信息的 Token 序列 |
 | `src/parser/` | 递归下降语法分析，构建 AST |
-| `src/ast/` | AST 节点定义、访问者接口、调试打印 |
+| `src/ast/` | AST 节点定义、类型系统、访问者接口、调试打印 |
 | `src/main.cpp` | 读取 stdin、驱动前端流水线、错误汇总 |
 
-前端**不负责**语义检查、IR 与汇编生成（由成员 B/C 在 `semantic/`、`ir/`、`codegen/` 实现）。
+前端**不负责**语义检查、IR 与汇编生成（由成员 B/C 在 `semantic/`、`codegen/` 实现）。语义集成步骤见 [SemanticIntegration.md](./SemanticIntegration.md)。
 
 ---
 
@@ -31,7 +31,8 @@ Lexer(source)     →  const std::vector<Token>& tokens
     │                   词法错误写入 lexer.errors()，不中断扫描）
     ▼
 Parser(tokens)    →  std::unique_ptr<CompUnit> ast
-    │                  （语法错误写入 parser.errors()，错误恢复后继续解析）
+    │                  （语法错误写入 parser.errors()，错误恢复后继续解析；
+    │                   构建时填充 isGlobal / isStatement / Expr::type 等字段）
     │
     ├── 存在任意错误  →  stderr 汇总输出全部 lexical / parse error
     │
@@ -64,10 +65,19 @@ Parser(tokens)    →  std::unique_ptr<CompUnit> ast
 - **方法**：递归下降 + 运算符优先级分层。
 - **顶层消歧**：`int x = ...` 为变量声明，`int f(...)` 为函数定义。
 - **赋值**：仅作为语句 `ID = Expr;`，**不能**出现在表达式中（如 `(b = 1)` 会报语法错）。
-- **表达式优先级**（从低到高）：`||` → `&&` → 关系 → `+/-` → `*/%` → 一元 →  primary。
+- **表达式优先级**（从低到高）：`||` → `&&` → 关系 → `+/-` → `*/%` → 一元 → primary。
 - **短路保留**：`&&` / `||` 保留为 `BinaryExpr`，不在前端做常量折叠，便于后端实现短路。
 - **语法错误**：调用 `report_error()` 写入 `parser.errors()`，通过错误恢复机制**继续解析**；不在首个错误处停止。
 - **查询接口**：`parser.errors()`、`parser.has_errors()`。
+
+**Parser 在构建 AST 时额外填充的语义字段：**
+
+| 字段 | 填充规则 |
+|------|---------|
+| `VarDecl::is_global()` / `ConstDecl::is_global()` | 顶层声明 → `true`；块内 `DeclStmt` → `false` |
+| `CallExpr::is_statement()` | `foo();` 形式的 `ExprStmt` → `true`；其余表达式上下文 → `false` |
+| `Expr::type()` | `IntLiteral`、所有 `BinaryExpr`/`UnaryExpr` → `Type::intType()`；`IdentifierExpr`/`CallExpr` → 暂为 `nullptr`（由语义分析补全） |
+| `AssignStmt::lvalue()` | 构造独立的 `IdentifierExpr` 节点作为左值 |
 
 ### 2.3 错误处理与恢复
 
@@ -85,11 +95,12 @@ Parser(tokens)    →  std::unique_ptr<CompUnit> ast
 | `}`、`)` | 向前扫描至对应闭合符号 |
 | 其他（如标识符、运算符） | 仅跳过一个 token，减少连锁误报 |
 
-解析严重损坏的片段时，可能插入占位 AST 节点（如 `IntLiteral(0)`、`VarDecl("__error__", ...)`）以保证后续结构可继续分析；这些节点仅供前端容错，语义阶段不应依赖其含义。
+解析严重损坏的片段时，可能插入占位 AST 节点（如 `IntLiteral(0)`、`VarDecl("__error__", ..., true)`）以保证后续结构可继续分析；这些节点仅供前端容错，语义阶段不应依赖其含义。
 
 ### 2.4 AST 设计
 
-- 所有节点继承 `AstNode`，含 `kind()`、`location()`、`accept(AstVisitor&)`。
+- 所有节点继承 `AstNode`，含 `kind()`、`location()`、`line()`、`column()`、`accept(AstVisitor&)`。
+- 表达式节点继承 `Expr`，含 `type()` / `set_type()`，类型对象由 `Type::intType()` / `Type::voidType()` 提供。
 - 子节点用 `std::unique_ptr` 持有；顶层 `CompUnit::items()` 为 `variant<VarDecl, ConstDecl, FuncDef>`。
 - `AstVisitor` 为每种节点定义 `visit()`；`AstPrinter` 是调试与后续模块的参考实现。
 
@@ -109,6 +120,22 @@ CompUnit
     └── ...
 ```
 
+### 2.5 语义就绪字段（P0/P1 已完成）
+
+成员 B 的 [Semantic.md](./Semantic.md) 要求前端 AST 携带以下字段；当前实现状态如下：
+
+| 节点 | 前端接口 | 说明 | 状态 |
+|------|---------|------|:----:|
+| `AstNode` | `line()` / `column()` / `location()` | 错误定位 | ✅ |
+| `Expr` | `type()` / `set_type()` | 表达式类型；字面量/运算已为 `int` | ✅ |
+| `VarDecl` / `ConstDecl` | `init()` / `init_expr()` | 初始化表达式 | ✅ |
+| `VarDecl` / `ConstDecl` | `is_global()` | 全局/局部作用域 | ✅ |
+| `FuncDef` | `return_type()` → `Type*` | 函数返回类型 | ✅ |
+| `CallExpr` | `is_statement()` | void 调用是否仅作语句 | ✅ |
+| `AssignStmt` | `lvalue()` → `IdentifierExpr` | 赋值左值（`name()` 为便捷别名） | ✅ |
+
+与 B 侧 AST 命名对照及后续集成步骤见 [SemanticIntegration.md](./SemanticIntegration.md)。
+
 ---
 
 ## 3. 目录结构
@@ -124,6 +151,7 @@ src/
 │   └── Parser.h / Parser.cpp   # 含 ParseError
 └── ast/
     ├── AstNode.h         # 基类、SourceLocation、AstNodeKind
+    ├── Type.h / Type.cpp # int / void 类型单例
     ├── AstVisitor.h      # 访问者接口（语义/IR/CodeGen 扩展点）
     ├── CompUnit.h        # 编译单元根
     ├── Decl.h            # VarDecl、ConstDecl
@@ -176,9 +204,9 @@ PowerShell 不支持 `<` 重定向，请用管道：
 # 基本运行
 Get-Content tests\basic\return_7.tc | .\cmake-build-debug\toyc.exe
 
-# 查看 AST
+# 查看 AST（可观察 global/local、Call ... stmt 等语义字段）
 $env:TOYC_DUMP_AST = "1"
-Get-Content tests\basic\return_7.tc | .\cmake-build-debug\toyc.exe 2>&1
+Get-Content tests\parser\full_syntax.tc | .\cmake-build-debug\toyc.exe 2>&1
 
 # 清除 AST 输出
 Remove-Item Env:TOYC_DUMP_AST -ErrorAction SilentlyContinue
@@ -248,7 +276,7 @@ int main() {
 | 目录 | 用途 |
 |------|------|
 | `tests/lexer/` | 词法单元测试（关键字、标识符、注释等） |
-| `tests/semantic/` | 语义分析测试（成员 B） |
+| `tests/semantic/` | 语义分析测试（成员 B；集成后由完整编译器运行） |
 | `tests/control_flow/` | 控制流端到端测试 |
 | `tests/performance/` | 性能测试 |
 | `scripts/run_tests.ps1` | 端到端测试脚本（成员 D 维护） |
@@ -278,7 +306,7 @@ if (lexer.has_errors() || parser.has_errors()) {
     /* 退出码 1 */
 }
 
-// 无错误时，ast 即为前端交付物
+// 无错误时，ast 即为前端交付物（已含语义就绪字段）
 ```
 
 ### 6.2 错误类型与汇总
@@ -307,13 +335,18 @@ for (const ParseError& error : parser.errors()) {
 语义分析与代码生成应实现 `AstVisitor` 子类，在确认 `lexer.has_errors()` 与 `parser.has_errors()` 均为 false 后，再遍历 AST：
 
 ```cpp
-// 语义分析（成员 B）
-SemanticAnalyzer analyzer;
-analyzer.analyze(*ast);
+#include "semantic/SemanticAnalyzer.h"
 
-// 代码生成（成员 C）
-CodeGen codegen(std::cout, optimize);
-codegen.emit(*ast);
+SemanticAnalyzer analyzer;
+if (!analyzer.analyze(*ast)) {
+    for (const SemanticError& err : analyzer.errors()) {
+        std::cerr << err.line << ':' << err.column
+                  << ": error: [SEM_" << std::setfill('0') << std::setw(3)
+                  << static_cast<int>(err.code) << "] "
+                  << err.message << '\n';
+    }
+    return 1;
+}
 ```
 
 参考实现：`AstPrinter`（`src/ast/AstPrinter.h`）。
@@ -322,14 +355,24 @@ codegen.emit(*ast);
 
 - 输入：始终为完整源码字符串。
 - 输出：`unique_ptr<CompUnit>`，所有权在调用方；**仅在前端无错误时使用 AST**。
-- 不修改 AST；语义信息放入符号表或 IR 层。
-- 所有 AST 节点均含 `SourceLocation`，错误报告应复用行列格式。
+- 语义分析可在遍历过程中通过 `Expr::set_type()` 补全 `IdentifierExpr` / `CallExpr` 的类型；符号信息写入 `SemanticAnalyzer` 的符号表，而非 AST 节点本身。
+- 所有 AST 节点均含 `SourceLocation`（及 `line()` / `column()`），错误报告应复用行列格式。
 
 ### 6.4 调试开关
 
 | 环境变量 | 作用 |
 |---------|------|
 | `TOYC_DUMP_AST=1` | 将 AST 树形结构打印到 stderr |
+
+**AstPrinter 输出中的语义字段标记：**
+
+| 标记 | 含义 |
+|------|------|
+| `VarDecl x global` / `local` | 全局或局部变量 |
+| `ConstDecl N global` / `local` | 全局或局部常量 |
+| `Call foo stmt` | 语句级函数调用（`is_statement == true`） |
+| `Call fib`（无 `stmt`） | 表达式上下文中的调用 |
+| `Assign` 下先打印 `Ident`，再打印右值 | `AssignStmt::lvalue()` 为独立节点 |
 
 ---
 
@@ -350,17 +393,23 @@ codegen.emit(*ast);
 
 ## 8. 后续工作
 
-- [ ] 成员 B：在 `main.cpp` 的 `parser.parse()` 后接入 `SemanticAnalyzer`
-- [ ] 成员 C：语义通过后接入 `CodeGen`，stdout 输出 RISC-V32 汇编
-- [ ] 成员 D：完善 `run_tests.ps1`，对比 ToyC 与 GCC 退出码
-- [ ] 可选：补充 `tests/lexer/`、`tests/parser/` 自动化脚本
+| 优先级 | 任务 | 负责 | 状态 | 说明 |
+|--------|------|------|:----:|------|
+| P0/P1 | AST 语义就绪字段（`type` / `isGlobal` / `isStatement` / `lvalue` 等） | A | ✅ | 见 §2.5 |
+| P2 | 适配 B 侧 `SemanticAnalyzer` 至前端 AST / `AstVisitor` | A + B | 待做 | 见 [SemanticIntegration.md](./SemanticIntegration.md) §2 |
+| P3 | `main.cpp` 串联语义分析、CMake 合并、跑通 `tests/semantic/` | A + B | 待做 | 见 [SemanticIntegration.md](./SemanticIntegration.md) §3 |
+| — | 语义通过后接入 `CodeGen`，stdout 输出 RISC-V32 汇编 | C | 待做 | |
+| — | 完善 `run_tests.ps1`，对比 ToyC 与 GCC 退出码 | D | 待做 | |
+| 可选 | 补充 `tests/lexer/`、`tests/parser/` 自动化脚本 | A | 待做 | |
 
 ---
 
 ## 9. 相关文档
 
+- [Semantic.md](./Semantic.md) — 成员 B 语义分析模块说明
+- [SemanticIntegration.md](./SemanticIntegration.md) — P2/P3 集成实施方案（AST 命名对照、接口改动、构建与测试）
 - [任务要求.md](./任务要求.md) — ToyC 语言定义与评测规范
 - [开发任务与分工.md](./开发任务与分工.md) — 四人分工与里程碑
 - [README.md](./README.md) — 项目总览
 
-> **说明**：前端模块的完整设计与接口以本文档（仓库根目录 `Frontend.md`）为唯一说明；请勿在 `docs/` 下维护重复的前端文档。
+> **说明**：前端模块的完整设计与接口以本文档（仓库根目录 `FrontEnd.md`）为唯一说明；请勿在 `docs/` 下维护重复的前端文档。
