@@ -1,0 +1,8 @@
+// 非法测试8: const初始化引用非常量变量
+// 目标：应报错 SEM_CONST_EXPR_NON_CONST
+int x = 5;
+const int A = x + 1;  // x是变量，不是常量
+
+int main(void) {
+    return 0;
+}

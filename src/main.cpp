@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
             printer.print(*ast);
         }
 
-        // 语义分析与代码生成由其他模块负责；前端阶段暂不输出汇编。
+        // 语义分析与代码生成由后续模块负责
         std::cout << "// ToyC frontend: parse succeeded\n";
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';

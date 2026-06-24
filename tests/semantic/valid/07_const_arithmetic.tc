@@ -1,0 +1,9 @@
+// 测试7: 常量算术运算
+// 目标：验证const初始化中的算术运算（编译期求值）
+const int A = 1 + 2 * 3;      // 应为 7
+const int B = A * 2 - 5;      // 应为 9
+const int C = (A + B) % 7;    // 应为 (7+9)%7 = 2
+
+int main(void) {
+    return C;  // 期望退出码: 2
+}

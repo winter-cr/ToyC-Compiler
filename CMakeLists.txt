@@ -17,9 +17,13 @@ add_executable(toyc
     src/ast/CompUnit.cpp
     src/ast/AstPrinter.cpp
     src/parser/Parser.cpp
+    src/semantic/Symbol.cpp
+    src/semantic/SymbolTable.cpp
+    src/semantic/SemanticAnalyzer.cpp
+    src/semantic/ConstExprEvaluator.cpp
 )
 
-target_include_directories(toyc PRIVATE src)
+target_include_directories(toyc PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(MSVC)
     target_compile_options(toyc PRIVATE /W4 /permissive-)
