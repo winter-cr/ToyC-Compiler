@@ -1,0 +1,26 @@
+const int G = 1;
+int x = 2;
+
+int add(int a, int b) {
+    return a + b;
+}
+
+void noop() {
+    ;
+}
+
+int main() {
+    int y = 3;
+    if (x < y && add(G, y) != 0) {
+        while (y > 0) {
+            y = y - 1;
+            if (y == 1) {
+                break;
+            }
+            continue;
+        }
+    } else {
+        return 0;
+    }
+    return add(x, y);
+}
