@@ -1,3 +1,4 @@
+// while 循环测试：验证循环 3 次后 i 累加到 3，返回值正确。
 int main() {
     int i = 0;
     while (i < 3) {

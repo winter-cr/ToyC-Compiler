@@ -1,3 +1,6 @@
+# Windows 冒烟测试入口：CMake 配置 → 编译 → ctest → 用编译好的 toyc 编译单个 .tc 源文件，
+# 验证编译器端到端管线是否正常工作。
+
 param(
     [string]$BuildDir = "build"
 )

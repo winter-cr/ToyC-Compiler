@@ -1,3 +1,4 @@
+// if-else 分支测试：验证条件恒真时走 if 分支（return 3），else 分支不被执行。
 int main() {
     if (1) {
         return 3;

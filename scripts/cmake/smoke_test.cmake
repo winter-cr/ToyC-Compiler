@@ -1,3 +1,6 @@
+# CMake 冒烟测试辅助模块：调用 toyc 编译器处理输入文件，并断言输出文件非空。
+# 需外部传入变量：TOYC_EXECUTABLE（编译器路径）、TEST_INPUT（.tc 源文件）、TEST_OUTPUT（输出路径）。
+
 if(NOT DEFINED TOYC_EXECUTABLE)
     message(FATAL_ERROR "TOYC_EXECUTABLE is required")
 endif()
