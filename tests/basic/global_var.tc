@@ -1,0 +1,6 @@
+// 全局变量测试：验证全局 int 变量的声明、初始化和在 main 中的引用。
+int g = 6;
+
+int main() {
+    return g;
+}

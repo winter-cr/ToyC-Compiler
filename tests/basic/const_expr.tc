@@ -1,0 +1,5 @@
+// 常量表达式测试：验证 const 变量声明及常量折叠（2 + 3 → 5）。
+int main() {
+    const int x = 2 + 3;
+    return x;
+}
