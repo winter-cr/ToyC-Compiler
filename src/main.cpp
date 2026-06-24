@@ -51,7 +51,7 @@ int main(int argc, char* argv[]) {
         const std::string source = read_all_stdin();
         Lexer lexer(source);
         Parser parser(lexer.tokens());
-        std::unique_ptr<CompUnit> ast = parser.parse();
+        std::unique_ptr<toyc::CompUnit> ast = parser.parse();
 
         bool failed = false;
         for (const LexError& error : lexer.errors()) {

@@ -2,6 +2,8 @@
 
 #include <string>
 
+namespace toyc {
+
 enum class TypeKind {
     Int,
     Void,
@@ -24,3 +26,5 @@ private:
     TypeKind kind_;
     std::string name_;
 };
+
+} // namespace toyc
