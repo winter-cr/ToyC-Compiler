@@ -1,0 +1,9 @@
+build/
+out/
+ci-out/
+*.s
+*.o
+*.exe
+*.log
+.vs/
+.vscode/

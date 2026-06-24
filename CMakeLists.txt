@@ -26,3 +26,14 @@ if(MSVC)
 else()
     target_compile_options(toyc PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+enable_testing()
+
+add_test(
+    NAME smoke_basic_output
+    COMMAND ${CMAKE_COMMAND}
+        -DTOYC_EXECUTABLE=$<TARGET_FILE:toyc>
+        -DTEST_INPUT=${CMAKE_SOURCE_DIR}/tests/basic/return_7.tc
+        -DTEST_OUTPUT=${CMAKE_BINARY_DIR}/smoke_return_7.s
+        -P ${CMAKE_SOURCE_DIR}/scripts/cmake/smoke_test.cmake
+)
