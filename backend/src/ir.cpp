@@ -146,7 +146,101 @@ void FunctionBuilder::emit(Instruction instruction) {
     function_.instructions.push_back(std::move(instruction));
 }
 
+Value FunctionBuilder::emitLogicalAnd(
+    Value left, const ConditionEmitter& emit_right) {
+    const auto result = createTemporary();
+    const auto evaluate_right = createLabel("and_rhs");
+    const auto true_label = createLabel("and_true");
+    const auto false_label = createLabel("and_false");
+    const auto end_label = createLabel("and_end");
+
+    emit(Instruction::branch(std::move(left), evaluate_right, false_label));
+    emit(Instruction::makeLabel(evaluate_right));
+    emit(Instruction::branch(emit_right(*this), true_label, false_label));
+    emit(Instruction::makeLabel(true_label));
+    emit(Instruction::copy(result, Value::imm(1)));
+    emit(Instruction::jump(end_label));
+    emit(Instruction::makeLabel(false_label));
+    emit(Instruction::copy(result, Value::imm(0)));
+    emit(Instruction::makeLabel(end_label));
+    return result;
+}
+
+Value FunctionBuilder::emitLogicalOr(
+    Value left, const ConditionEmitter& emit_right) {
+    const auto result = createTemporary();
+    const auto evaluate_right = createLabel("or_rhs");
+    const auto true_label = createLabel("or_true");
+    const auto false_label = createLabel("or_false");
+    const auto end_label = createLabel("or_end");
+
+    emit(Instruction::branch(std::move(left), true_label, evaluate_right));
+    emit(Instruction::makeLabel(evaluate_right));
+    emit(Instruction::branch(emit_right(*this), true_label, false_label));
+    emit(Instruction::makeLabel(true_label));
+    emit(Instruction::copy(result, Value::imm(1)));
+    emit(Instruction::jump(end_label));
+    emit(Instruction::makeLabel(false_label));
+    emit(Instruction::copy(result, Value::imm(0)));
+    emit(Instruction::makeLabel(end_label));
+    return result;
+}
+
+void FunctionBuilder::emitIf(Value condition,
+                             const StatementEmitter& emit_then,
+                             const StatementEmitter& emit_else) {
+    const auto then_label = createLabel("if_then");
+    const auto else_label = createLabel("if_else");
+    const auto end_label = createLabel("if_end");
+
+    emit(Instruction::branch(std::move(condition), then_label,
+                             emit_else ? else_label : end_label));
+    emit(Instruction::makeLabel(then_label));
+    emit_then(*this);
+    emit(Instruction::jump(end_label));
+    if (emit_else) {
+        emit(Instruction::makeLabel(else_label));
+        emit_else(*this);
+        emit(Instruction::jump(end_label));
+    }
+    emit(Instruction::makeLabel(end_label));
+}
+
+void FunctionBuilder::emitWhile(const ConditionEmitter& emit_condition,
+                                const StatementEmitter& emit_body) {
+    const auto condition_label = createLabel("while_condition");
+    const auto body_label = createLabel("while_body");
+    const auto end_label = createLabel("while_end");
+
+    emit(Instruction::jump(condition_label));
+    emit(Instruction::makeLabel(condition_label));
+    emit(Instruction::branch(emit_condition(*this), body_label, end_label));
+    emit(Instruction::makeLabel(body_label));
+    loop_targets_.push_back(LoopTargets{condition_label, end_label});
+    emit_body(*this);
+    loop_targets_.pop_back();
+    emit(Instruction::jump(condition_label));
+    emit(Instruction::makeLabel(end_label));
+}
+
+void FunctionBuilder::emitBreak() {
+    if (loop_targets_.empty()) {
+        throw std::logic_error("break emitted outside of a loop");
+    }
+    emit(Instruction::jump(loop_targets_.back().break_target));
+}
+
+void FunctionBuilder::emitContinue() {
+    if (loop_targets_.empty()) {
+        throw std::logic_error("continue emitted outside of a loop");
+    }
+    emit(Instruction::jump(loop_targets_.back().continue_target));
+}
+
 Function FunctionBuilder::finish() && {
+    if (!loop_targets_.empty()) {
+        throw std::logic_error("cannot finish a function while lowering a loop");
+    }
     return std::move(function_);
 }
 
@@ -187,6 +281,35 @@ std::vector<std::string> validate(const Program& program) {
         };
 
         for (const auto& instruction : function.instructions) {
+            const auto require_destination =
+                instruction.kind == InstructionKind::Copy ||
+                instruction.kind == InstructionKind::Unary ||
+                instruction.kind == InstructionKind::Binary;
+            if (require_destination && !instruction.destination) {
+                errors.push_back("missing destination in " + function.name);
+            }
+            if ((instruction.kind == InstructionKind::Copy ||
+                 instruction.kind == InstructionKind::Unary ||
+                 instruction.kind == InstructionKind::Branch) &&
+                !instruction.left) {
+                errors.push_back("missing operand in " + function.name);
+            }
+            if (instruction.kind == InstructionKind::Binary &&
+                (!instruction.left || !instruction.right ||
+                 !instruction.binary_op)) {
+                errors.push_back("incomplete binary instruction in " +
+                                 function.name);
+            }
+            if (instruction.kind == InstructionKind::Unary &&
+                !instruction.unary_op) {
+                errors.push_back("incomplete unary instruction in " +
+                                 function.name);
+            }
+            if (instruction.destination &&
+                instruction.destination->kind == ValueKind::Immediate) {
+                errors.push_back("immediate destination in " + function.name);
+            }
+
             if (instruction.kind == InstructionKind::Jump) {
                 check_target(instruction.label);
             } else if (instruction.kind == InstructionKind::Branch) {

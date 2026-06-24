@@ -1,8 +1,11 @@
 #include "toyc/backend/ir.hpp"
+#include "toyc/backend/optimizer.hpp"
 #include "toyc/backend/riscv32_codegen.hpp"
+#include "toyc/backend/text_ir.hpp"
 
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -34,6 +37,10 @@ void testArithmeticAndFrame() {
             "saves return address");
     require(assembly.find("mv sp, s0") != std::string::npos,
             "restores stack pointer");
+    require(assembly.find("mv s1, t2") != std::string::npos,
+            "keeps a temporary in a callee-saved register");
+    require(assembly.find("sw s1, -12(t5)") != std::string::npos,
+            "preserves an allocated callee-saved register");
 }
 
 void testControlFlowAndGlobal() {
@@ -93,6 +100,107 @@ void testValidation() {
     require(!validate(program).empty(), "rejects undefined branch target");
 }
 
+void testStructuredControlFlowAndShortCircuit() {
+    Program program;
+    FunctionBuilder function("main");
+    const auto local = function.createLocal("counter");
+    function.emit(Instruction::copy(local, Value::imm(0)));
+
+    const auto logical = function.emitLogicalAnd(
+        Value::imm(1), [](FunctionBuilder& builder) {
+            const auto result = builder.createTemporary();
+            builder.emit(Instruction::call(result, "side_effect", {}));
+            return result;
+        });
+
+    function.emitIf(
+        logical,
+        [local](FunctionBuilder& builder) {
+            builder.emit(Instruction::copy(local, Value::imm(1)));
+        },
+        [local](FunctionBuilder& builder) {
+            builder.emit(Instruction::copy(local, Value::imm(2)));
+        });
+
+    function.emitWhile(
+        [local](FunctionBuilder&) { return local; },
+        [](FunctionBuilder& builder) {
+            builder.emitContinue();
+            builder.emitBreak();
+        });
+    function.emit(Instruction::ret(local));
+    program.functions.push_back(std::move(function).finish());
+
+    const auto errors = validate(program);
+    require(errors.empty(), "structured lowering creates valid IR");
+    const auto assembly = RiscV32CodeGenerator{}.generate(program);
+    const auto rhs = assembly.find("and_rhs");
+    const auto call = assembly.find("call side_effect");
+    require(rhs != std::string::npos && call > rhs,
+            "short-circuit right operand is emitted on its own path");
+    require(assembly.find("while_condition") != std::string::npos,
+            "emits while loop labels");
+}
+
+void testOptimizer() {
+    Program program;
+    FunctionBuilder function("main");
+    const auto folded = function.createTemporary();
+    const auto dead = function.createTemporary();
+    function.emit(Instruction::binary(folded, BinaryOp::Multiply,
+                                      Value::imm(6), Value::imm(7)));
+    function.emit(Instruction::binary(dead, BinaryOp::Add, Value::imm(1),
+                                      Value::imm(2)));
+    function.emit(Instruction::ret(folded));
+    program.functions.push_back(std::move(function).finish());
+
+    const auto optimized = optimize(std::move(program));
+    const auto& instructions = optimized.functions.front().instructions;
+    require(instructions.size() == 2, "removes an unused temporary");
+    require(instructions.front().kind == InstructionKind::Copy,
+            "folds a constant binary expression");
+    require(instructions.front().left->kind == ValueKind::Immediate &&
+                instructions.front().left->immediate == 42,
+            "computes the folded value");
+}
+
+void testTextIrParser() {
+    std::istringstream input{
+        "global @answer 0\n"
+        "function main\n"
+        "binary %t0 add 40 2\n"
+        "copy @answer %t0\n"
+        "return %t0\n"
+        "end\n"};
+    const auto parsed = parseTextIr(input);
+    require(parsed.ok(), "parses textual IR");
+    require(parsed.program.globals.size() == 1,
+            "parses a global declaration");
+    require(parsed.program.functions.size() == 1,
+            "parses a function");
+    require(parsed.program.functions.front().instructions.size() == 3,
+            "parses function instructions");
+}
+
+void testTemporarySpilling() {
+    Program program;
+    FunctionBuilder function("main");
+    std::vector<Value> temporaries;
+    for (int index = 0; index < 12; ++index) {
+        const auto temporary = function.createTemporary();
+        temporaries.push_back(temporary);
+        function.emit(Instruction::copy(temporary, Value::imm(index)));
+    }
+    function.emit(Instruction::ret(temporaries.back()));
+    program.functions.push_back(std::move(function).finish());
+
+    const auto assembly = RiscV32CodeGenerator{}.generate(program);
+    require(assembly.find("sw s11") != std::string::npos,
+            "uses all available temporary registers");
+    require(assembly.find("sw t0, -56(s0)") != std::string::npos,
+            "spills excess temporaries to the stack");
+}
+
 } // namespace
 
 int main() {
@@ -100,5 +208,9 @@ int main() {
     testControlFlowAndGlobal();
     testCallingConventionWithStackArguments();
     testValidation();
+    testStructuredControlFlowAndShortCircuit();
+    testOptimizer();
+    testTextIrParser();
+    testTemporarySpilling();
     std::cout << "backend tests passed\n";
 }

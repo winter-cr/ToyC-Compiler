@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -107,6 +108,9 @@ struct Program {
 
 class FunctionBuilder {
 public:
+    using ConditionEmitter = std::function<Value(FunctionBuilder&)>;
+    using StatementEmitter = std::function<void(FunctionBuilder&)>;
+
     explicit FunctionBuilder(std::string name, bool returns_value = true);
 
     Value addParameter(std::string name = {});
@@ -114,13 +118,32 @@ public:
     Value createTemporary();
     std::string createLabel(std::string prefix = "L");
     void emit(Instruction instruction);
+
+    // Structured helpers used by an AST-to-IR lowering pass. The right-hand
+    // side of logical operations is emitted only on the path where it is
+    // needed, preserving C short-circuit semantics.
+    Value emitLogicalAnd(Value left, const ConditionEmitter& emit_right);
+    Value emitLogicalOr(Value left, const ConditionEmitter& emit_right);
+    void emitIf(Value condition, const StatementEmitter& emit_then,
+                const StatementEmitter& emit_else = {});
+    void emitWhile(const ConditionEmitter& emit_condition,
+                   const StatementEmitter& emit_body);
+    void emitBreak();
+    void emitContinue();
+
     [[nodiscard]] Function finish() &&;
 
 private:
+    struct LoopTargets {
+        std::string continue_target;
+        std::string break_target;
+    };
+
     Function function_;
     std::uint32_t next_local_{0};
     std::uint32_t next_temporary_{0};
     std::uint32_t next_label_{0};
+    std::vector<LoopTargets> loop_targets_;
 };
 
 // Checks structural backend assumptions. Semantic/type validity remains the
