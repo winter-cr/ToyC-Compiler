@@ -1,0 +1,12 @@
+# 测试用例 → 期望返回值映射表（TSV 格式）。
+# 冒烟测试脚本读取此文件，逐行编译 .tc 源文件并对比运行后的返回值。
+tests/basic/return_0.tc	0
+tests/basic/return_7.tc	7
+tests/basic/return_negative_expr.tc	1
+tests/basic/local_var.tc	5
+tests/basic/const_expr.tc	5
+tests/basic/if_else.tc	3
+tests/basic/while_loop.tc	3
+tests/basic/function_call.tc	7
+tests/basic/global_var.tc	6
+tests/basic/short_circuit.tc	8

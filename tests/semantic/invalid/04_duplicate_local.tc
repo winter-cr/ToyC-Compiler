@@ -1,0 +1,7 @@
+// 非法测试4: 局部变量重定义
+// 目标：应报错 SEM_REDEFINED_SYMBOL
+int main(void) {
+    int x = 1;
+    int x = 2;  // 重定义
+    return x;
+}

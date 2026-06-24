@@ -1,0 +1,7 @@
+// 测试3: 全局变量声明
+// 目标：验证int全局变量声明
+int g_x = 5;
+int g_y = g_x + 3;  // 允许引用已声明的全局变量
+int main(void) {
+    return g_x + g_y;
+}

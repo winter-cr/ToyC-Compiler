@@ -1,0 +1,5 @@
+// 测试1: 最简单的合法程序 - 空main函数
+// 目标：验证main函数基本结构
+int main(void) {
+    return 0;
+}

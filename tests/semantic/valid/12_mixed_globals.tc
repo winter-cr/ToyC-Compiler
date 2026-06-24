@@ -1,0 +1,10 @@
+// 测试12: 多个全局常量和变量混合
+// 目标：验证多个声明的共存和引用
+const int A = 1;
+const int B = A + 2;
+int X = 5;
+int Y = X * B;
+
+int main(void) {
+    return Y;
+}

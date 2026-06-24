@@ -1,0 +1,42 @@
+# Build outputs
+build/
+out/
+bin/
+obj/
+ci-out/
+*.exe
+*.out
+*.o
+*.obj
+*.so
+*.dll
+*.lib
+*.a
+*.s
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Test artifacts
+test.exe
+test_basic.exe
+test_*.exe
+
+# Logs
+*.log
+
+# Temporary
+*.tmp
+*.temp
