@@ -3,6 +3,7 @@ build/
 out/
 bin/
 obj/
+ci-out/
 *.exe
 *.out
 *.o
@@ -11,8 +12,10 @@ obj/
 *.dll
 *.lib
 *.a
+*.s
 
 # IDE
+.vs/
 .vscode/
 .idea/
 *.swp

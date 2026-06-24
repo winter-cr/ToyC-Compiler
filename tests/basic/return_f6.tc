@@ -1,0 +1,13 @@
+//break/continue
+int main()
+{
+    int i,s = 0;        //此处应当分开赋值，toyC不支持一次声明多个变量
+    for (int i = 0; i < 10; i++)
+    {
+        if (i % 2 == 0)
+            continue;
+        s+=i;
+    }
+
+    return s;       //
+}

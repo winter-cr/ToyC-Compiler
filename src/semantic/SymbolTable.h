@@ -4,7 +4,6 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
-#include <memory>
 
 namespace semantic {
 

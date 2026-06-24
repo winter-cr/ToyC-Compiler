@@ -1,48 +1,43 @@
-cmake_minimum_required(VERSION 3.20)
-project(ToyCCompiler VERSION 1.0.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.16)
+project(ToyC-Compiler LANGUAGES CXX)
 
-# 设置C++标准
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 如果使用MSVC，禁用一些警告
-if(MSVC)
-    add_compile_options(/W3)
-else()
-    add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-# 可执行文件
-add_executable(compiler
+add_executable(toyc
     src/main.cpp
+    src/lexer/Token.cpp
+    src/lexer/Lexer.cpp
+    src/ast/Type.cpp
+    src/ast/Expr.cpp
+    src/ast/Decl.cpp
+    src/ast/Stmt.cpp
+    src/ast/FuncDef.cpp
+    src/ast/CompUnit.cpp
+    src/ast/AstPrinter.cpp
+    src/parser/Parser.cpp
     src/semantic/Symbol.cpp
     src/semantic/SymbolTable.cpp
     src/semantic/SemanticAnalyzer.cpp
-    # TODO: 添加其他模块的源文件
+    src/semantic/ConstExprEvaluator.cpp
 )
 
-target_include_directories(compiler PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+target_include_directories(toyc PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR})
 
-# 测试目标（可选）
+if(MSVC)
+    target_compile_options(toyc PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(toyc PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 enable_testing()
 
-# 添加测试
-add_test(NAME semantic_empty_main
-    COMMAND ${CMAKE_COMMAND} -E echo "int main(void) { return 0; }" | $<TARGET_FILE:compiler>
+add_test(
+    NAME smoke_basic_output
+    COMMAND ${CMAKE_COMMAND}
+        -DTOYC_EXECUTABLE=$<TARGET_FILE:toyc>
+        -DTEST_INPUT=${CMAKE_SOURCE_DIR}/tests/basic/return_7.tc
+        -DTEST_OUTPUT=${CMAKE_BINARY_DIR}/smoke_return_7.s
+        -P ${CMAKE_SOURCE_DIR}/scripts/cmake/smoke_test.cmake
 )
-
-# 测试函数：验证测试样例
-function(add_semantic_test test_name test_file expected_exit_code)
-    add_test(NAME ${test_name}
-        COMMAND ${CMAKE_COMMAND} -E echo "$<JOIN:<, $<FILE:${test_file}>>" | $<TARGET_FILE:compiler>
-    )
-    set_tests_properties(${test_name} PROPERTIES
-        PASS_REGULAR_EXPRESSION ""
-        FAIL_REGULAR_EXPRESSION ""
-    )
-endfunction()
-
-# 可以手动运行以下命令测试：
-# ctest -R semantic_ -V
