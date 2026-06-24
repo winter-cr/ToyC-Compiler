@@ -1,0 +1,11 @@
+// 性能基准：递归斐波那契 fib(10)=55。用于对比 -opt 前后的执行时间。
+int fib(int n) {
+    if (n < 2) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+int main() {
+    return fib(10);
+}

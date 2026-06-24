@@ -1,0 +1,11 @@
+// 嵌套 if-else 测试：多层条件分支的返回值验证。
+int main() {
+    int x = 10;
+    if (x > 5) {
+        if (x > 8) {
+            return 7;
+        }
+        return 5;
+    }
+    return 0;
+}

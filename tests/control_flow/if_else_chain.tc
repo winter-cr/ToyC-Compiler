@@ -1,0 +1,16 @@
+// if-else 链测试：多层条件分支的优先级判断。
+int main() {
+    int x = 15;
+    if (x > 20) {
+        return 10;
+    } else {
+        if (x > 10) {
+            return 20;
+        } else {
+            if (x > 5) {
+                return 5;
+            }
+        }
+    }
+    return 0;
+}

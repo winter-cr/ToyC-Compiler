@@ -1,0 +1,17 @@
+// break 跳出内层循环测试：break 只跳出最近一层 while，外层循环继续。
+int main() {
+    int i = 0;
+    int count = 0;
+    while (i < 5) {
+        int j = 0;
+        while (1) {
+            count = count + 1;
+            j = j + 1;
+            if (j >= 3) {
+                break;
+            }
+        }
+        i = i + 1;
+    }
+    return count;
+}

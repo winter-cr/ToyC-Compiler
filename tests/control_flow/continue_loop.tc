@@ -1,0 +1,13 @@
+// continue 跳过偶数测试：continue 跳过当前迭代剩余部分，累加奇数。
+int main() {
+    int i = 0;
+    int sum = 0;
+    while (i < 10) {
+        i = i + 1;
+        if (i % 2 == 0) {
+            continue;
+        }
+        sum = sum + 1;
+    }
+    return sum;
+}

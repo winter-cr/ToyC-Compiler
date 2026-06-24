@@ -1,0 +1,10 @@
+// 性能基准：累加 1..100 = 4950。用于对比 -opt 前后循环体生成的指令效率。
+int main() {
+    int i = 0;
+    int sum = 0;
+    while (i < 100) {
+        i = i + 1;
+        sum = sum + i;
+    }
+    return sum;
+}
