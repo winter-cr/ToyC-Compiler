@@ -85,20 +85,20 @@ jobs:
             -o build/e2e_out/simple_loop.elf build/e2e_out/_start.s build/e2e_out/simple_loop.s 2>&1
           set +e
           qemu-riscv32 build/e2e_out/simple_loop.elf 2>/dev/null
-          echo "exit_simple: $?"
-          # Tiny sum: i<3, sum=sum+i → expect 1+2+3=6
-          cat > /tmp/tiny_sum.tc <<'TC'
-          int main() { int i=0; int s=0; while(i<3){i=i+1;s=s+i;} return s; }
+          echo "exit_simple5: $?"
+          # Simple loop with bound 100
+          cat > /tmp/simple100.tc <<'TC'
+          int main() { int i=0; while(i<100) i=i+1; return i; }
           TC
-          echo "=== tiny_sum (expect 6) ==="
-          build/toyc < /tmp/tiny_sum.tc > build/e2e_out/tiny_sum.s 2>&1
-          cat build/e2e_out/tiny_sum.s
+          echo "=== simple100 (expect 100) ==="
+          build/toyc < /tmp/simple100.tc > build/e2e_out/simple100.s 2>&1
+          cat build/e2e_out/simple100.s
           riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 \
             -nostdlib -nostartfiles -static \
             -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
-            -o build/e2e_out/tiny_sum.elf build/e2e_out/_start.s build/e2e_out/tiny_sum.s 2>&1
-          qemu-riscv32 build/e2e_out/tiny_sum.elf 2>/dev/null
-          echo "exit_tiny_sum: $?"
+            -o build/e2e_out/simple100.elf build/e2e_out/_start.s build/e2e_out/simple100.s 2>&1
+          qemu-riscv32 build/e2e_out/simple100.elf 2>/dev/null
+          echo "exit_simple100: $?"
           # loop_sum
           echo "=== loop_sum ==="
           build/toyc < tests/performance/loop_sum.tc > build/e2e_out/test_ls.s 2>&1
