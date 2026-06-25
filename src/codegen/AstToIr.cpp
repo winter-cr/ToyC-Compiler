@@ -124,19 +124,59 @@ backend::Value AstToIr::emitExpr(Expr* expr, backend::FunctionBuilder& builder) 
     return backend::Value::imm(0);
 }
 
-// ---- Visitor: CompUnit ----
+// ---- Visitor: CompUnit (two-pass: globals first, then functions) ----
 
 void AstToIr::visit(const CompUnit& node) {
+    // Pass 1: collect all global declarations so functions can reference them
     for (auto& elem : node.elements) {
         if (auto* var = std::get_if<std::unique_ptr<VarDecl>>(&elem)) {
-            if (*var) (*var)->accept(*this);
+            if (*var && (*var)->isGlobal) (*var)->accept(*this);
         } else if (auto* cnst = std::get_if<std::unique_ptr<ConstDecl>>(&elem)) {
-            if (*cnst) (*cnst)->accept(*this);
+            if (*cnst && (*cnst)->isGlobal) (*cnst)->accept(*this);
+        }
+    }
+    // Pass 2: compile functions (which may reference globals from pass 1)
+    for (auto& elem : node.elements) {
+        if (auto* var = std::get_if<std::unique_ptr<VarDecl>>(&elem)) {
+            if (*var && !(*var)->isGlobal) (*var)->accept(*this);
+        } else if (auto* cnst = std::get_if<std::unique_ptr<ConstDecl>>(&elem)) {
+            if (*cnst && !(*cnst)->isGlobal) (*cnst)->accept(*this);
         } else if (auto* func = std::get_if<std::unique_ptr<FuncDef>>(&elem)) {
             if (*func) (*func)->accept(*this);
         }
     }
 }
+
+// ---- Constant expression evaluation for global initializers ----
+namespace {
+
+std::optional<int> evalGlobalInit(Expr* expr,
+    const std::vector<backend::Global>& globals) {
+    if (!expr) return std::nullopt;
+    if (auto* n = dynamic_cast<Number*>(expr)) return n->value;
+    if (auto* id = dynamic_cast<Identifier*>(expr)) {
+        for (auto& g : globals) {
+            if (g.name == id->name) return g.initial_value;
+        }
+        return std::nullopt;
+    }
+    if (auto* bin = dynamic_cast<BinaryExpr*>(expr)) {
+        auto l = evalGlobalInit(bin->left.get(), globals);
+        auto r = evalGlobalInit(bin->right.get(), globals);
+        if (!l || !r) return std::nullopt;
+        switch (bin->op) {
+            case toyc::BinaryOp::Add: return *l + *r;
+            case toyc::BinaryOp::Sub: return *l - *r;
+            case toyc::BinaryOp::Mul: return *l * *r;
+            case toyc::BinaryOp::Div: return (r && *r != 0) ? std::optional(*l / *r) : std::nullopt;
+            case toyc::BinaryOp::Mod: return (r && *r != 0) ? std::optional(*l % *r) : std::nullopt;
+            default: return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
 
 // ---- Visitor: Declarations ----
 
@@ -144,11 +184,9 @@ void AstToIr::visit(const VarDecl& node) {
     if (node.isGlobal) {
         int initVal = 0;
         if (node.initExpr) {
-            if (auto* n = dynamic_cast<Number*>(node.initExpr.get())) {
-                initVal = n->value;
+            if (auto val = evalGlobalInit(node.initExpr.get(), program_.globals)) {
+                initVal = *val;
             }
-            // Non-literal initializers default to 0; semantic analysis
-            // should have already verified compile-time evaluability.
         }
         program_.globals.push_back(backend::Global{node.name, initVal, false});
     } else {
@@ -166,8 +204,10 @@ void AstToIr::visit(const VarDecl& node) {
 void AstToIr::visit(const ConstDecl& node) {
     if (node.isGlobal) {
         int initVal = 0;
-        if (auto* n = dynamic_cast<Number*>(node.initExpr.get())) {
-            initVal = n->value;
+        if (node.initExpr) {
+            if (auto val = evalGlobalInit(node.initExpr.get(), program_.globals)) {
+                initVal = *val;
+            }
         }
         program_.globals.push_back(backend::Global{node.name, initVal, true});
     } else {
