@@ -73,7 +73,7 @@ jobs:
           echo "=== _start.s ==="
           cat build/e2e_out/_start.s
           echo "=== linking ==="
-          riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 -nostdlib -nostartfiles \
+          riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 -nostdlib -nostartfiles -static \
             -Wl,-e,_start -Wl,-Ttext=0x10000 \
             -o build/e2e_out/return_7.elf build/e2e_out/_start.s build/e2e_out/return_7.s 2>&1
           echo "=== ELF header ==="
