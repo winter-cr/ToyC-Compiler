@@ -56,6 +56,46 @@ jobs:
         run: |
           sudo apt-get install -y qemu-user gcc-riscv64-linux-gnu
 
+      - name: Debug loop_sum
+        run: |
+          mkdir -p build/e2e_out
+          cat > build/e2e_out/_start.s <<'ASM'
+            .section .text.start
+            .globl _start
+          _start:
+            call main
+            li a7, 93
+            ecall
+          ASM
+          # Simple loop: for(i=0; i<5; i=i+1) return i → should be 5
+          cat > /tmp/simple_loop.tc <<'TC'
+          int main() {
+              int i = 0;
+              while (i < 5)
+                  i = i + 1;
+              return i;
+          }
+          TC
+          echo "=== simple_loop (expect 5) ==="
+          build/toyc < /tmp/simple_loop.tc > build/e2e_out/simple_loop.s 2>&1
+          cat build/e2e_out/simple_loop.s
+          riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 \
+            -nostdlib -nostartfiles -static \
+            -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
+            -o build/e2e_out/simple_loop.elf build/e2e_out/_start.s build/e2e_out/simple_loop.s 2>&1
+          qemu-riscv32 build/e2e_out/simple_loop.elf 2>/dev/null
+          echo "exit: $?"
+          # Sum loop
+          echo "=== loop_sum (expect 5050) ==="
+          build/toyc < tests/performance/loop_sum.tc > build/e2e_out/test_ls.s 2>&1
+          cat build/e2e_out/test_ls.s
+          riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 \
+            -nostdlib -nostartfiles -static \
+            -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
+            -o build/e2e_out/test_ls.elf build/e2e_out/_start.s build/e2e_out/test_ls.s 2>&1
+          qemu-riscv32 build/e2e_out/test_ls.elf 2>/dev/null
+          echo "exit: $?"
+
       - name: Run end-to-end tests (normal mode)
         run: bash scripts/run_e2e_tests.sh --verbose
 
