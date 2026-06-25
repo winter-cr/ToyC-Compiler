@@ -1,226 +1,332 @@
 # ToyC 编译器实践报告
 
-## 项目概述
+## 摘要
 
-本项目实现了一个 ToyC → RISC-V32 汇编的编译器，由四人协作六天完成。编译器从标准输入读取 ToyC 源码，向标准输出写入 RISC-V32 汇编，支持 `-opt` 优化参数。
+本项目实现了一个将 ToyC 语言（C 语言的简化子集）编译为 RISC-V32 汇编的编译器。编译器采用 C++20 实现，基于 CMake 构建系统，架构上分为词法分析、语法分析（递归下降）、语义分析（符号表+作用域+常量求值）、中间表示（三地址码 IR）和 RISC-V32 代码生成五个阶段，支持 `-opt` 优化参数。经过四轮 OJ 在线评测，最终功能测试得分 93.33（28/30 通过），性能测试得分 6.82，总分 71.70。项目由四人协作六天完成，D 成员负责测试、集成、CI/CD 和报告汇总。
+
+**关键词**：ToyC 编译器；RISC-V32；递归下降；AST；符号表；中间表示；代码生成；常量折叠；短路求值
 
 ---
 
-## 一、架构设计
+## 一、实验目的和意义
 
-### 1.1 模块划分
+### 1.1 实验目的
+
+1. 掌握编译器前端技术：词法分析（Lexer）、递归下降语法分析（Parser）、抽象语法树（AST）的构建与遍历
+2. 掌握语义分析技术：嵌套作用域符号表、类型检查、常量表达式编译期求值、控制流语义验证
+3. 掌握编译器后端技术：中间表示（IR）设计、RISC-V32 指令选择、栈帧管理、调用约定、基础优化
+4. 实践软件工程协作：Git 分支管理、CI/CD 自动化测试、模块接口设计与集成
+
+### 1.2 实验意义
+
+编译原理是计算机科学的核心课程。通过从零实现一个完整的编译器，可以深入理解高级语言到机器指令的完整翻译过程，掌握有限状态自动机、上下文无关文法、属性文法、数据流分析等核心概念的实际应用。ToyC 作为 C 语言的简化子集，覆盖了变量声明、控制流、函数调用、作用域、短路逻辑等关键语言特性，是验证编译原理知识的理想实验平台。
+
+### 1.3 实验环境
+
+| 项目 | 配置 |
+|------|------|
+| 编程语言 | C++20 |
+| 构建系统 | CMake ≥ 3.16 |
+| 持续集成 | GitHub Actions（Ubuntu 22.04, g++ 13.3, CMake） |
+| RISC-V 工具链 | riscv64-linux-gnu-gcc, qemu-riscv32 |
+| 版本控制 | Git + GitHub |
+| OJ 评测平台 | 课程在线评测系统 |
+
+---
+
+## 二、ToyC 语言定义
+
+ToyC 是 C 语言的简化子集，支持以下核心特性：
+
+- **函数**：支持 `int` / `void` 返回类型，支持多参数传递，支持递归调用
+- **变量与常量**：支持 `int` 全局/局部变量和 `const int` 全局/局部常量，声明必须带初始化表达式
+- **语句**：语句块、空语句、表达式语句、赋值语句、`if`/`else`、`while`、`break`、`continue`、`return`
+- **表达式**：算术运算（`+ - * / %`）、关系运算（`< > <= >= == !=`）、逻辑运算（`&& || !`）
+- **短路求值**：`&&` 和 `||` 遵循 C 语言的短路语义
+- **作用域**：语句块创建嵌套作用域，内层可遮蔽外层同名变量
+- **常量表达式**：const 声明必须能在编译期求值
+
+ToyC 文法（EBNF）及完整语义约束见 `任务要求.md`。
+
+---
+
+## 三、设计思路
+
+### 3.1 总体架构
 
 ```
 stdin (ToyC 源码)
     │
     ▼
-┌──────────────┐
-│    Lexer     │  词法分析：源码 → Token 序列
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│    Parser    │  语法分析：Token → AST（递归下降）
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│  Semantic    │  语义分析：符号表、作用域、类型检查、常量求值
+┌──────────────┐   Token 序列
+│    Lexer     │ ──────────────►
+│  词法分析     │
+└──────────────┘
+                  │
+                  ▼
+┌──────────────┐   AST
+│    Parser    │ ──────────────►
+│  递归下降分析  │
+└──────────────┘
+                  │
+                  ▼
+┌──────────────┐   带类型信息的 AST
+│  Semantic    │ ──────────────►
 │  Analyzer    │
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│     IR       │  中间表示：AST → 三地址码（toyc::backend::Program）
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│  CodeGen     │  代码生成：IR → RISC-V32 汇编
-└──────┬───────┘
-       │
-       ▼
-stdout (RISC-V32 汇编)
+│  语义分析     │
+└──────────────┘
+                  │
+                  ▼
+┌──────────────┐   toyc::backend::Program
+│   AstToIr    │ ──────────────►
+│  AST→IR 转换 │
+└──────────────┘
+                  │
+                  ▼
+┌──────────────┐   优化的 IR
+│  Optimizer   │ ──────────────►  (-opt 模式)
+│  IR 优化     │
+└──────────────┘
+                  │
+                  ▼
+┌──────────────┐   RISC-V32 汇编
+│  CodeGen     │ ──────────────►
+│  代码生成     │
+└──────────────┘
+                  │
+                  ▼
+           stdout (汇编)
 ```
 
-### 1.2 技术选型
+### 3.2 技术选型理由
 
-- 语言：C++20
-- 构建：CMake ≥ 3.16
-- 可执行文件：`toyc`
-- 输入：stdin
-- 输出：stdout（汇编）、stderr（错误/诊断）
-- IR/后端：独立 `backend/` 目录，`toyc::backend` 命名空间
+- **C++20 + CMake**：团队熟悉，构建速度快，类型安全，STL 丰富
+- **递归下降 Parser**：无需第三方工具，实现直观，错误信息友好
+- **三地址码 IR**：简化代码生成，便于优化，与 RISC-V32 指令自然对应
+- **FunctionBuilder 模式**：高层 API（emitIf/emitWhile）封装了控制流标签和跳转逻辑，使 AST→IR 转换代码简洁可读
+
+### 3.3 接口设计
+
+- 编译器从 **stdin** 读取 ToyC 源码，向 **stdout** 输出 RISC-V32 汇编
+- 错误和诊断信息输出到 **stderr**
+- 支持 `-opt` 命令行参数开启优化模式
+- 支持 `TOYC_DUMP_AST` 环境变量输出 AST 结构（调试用）
 
 ---
 
-## 二、测试设计
+## 四、成员分工
 
-### 2.1 测试目录结构
+| 成员 | 角色 | 主要职责 | 交付物 |
+|:---:|------|------|------|
+| **A** | 前端负责人 | 词法分析（Lexer）、递归下降语法分析（Parser）、AST 节点定义、AstPrinter、前端文档 | Lexer, Parser, AST.h, ASTBase.h, AstPrinter, FrontEnd.md |
+| **B** | 语义负责人 | 符号表（嵌套作用域）、语义分析器、常量表达式求值器、错误码定义、语义测试用例 | SymbolTable, SemanticAnalyzer, ConstExprEvaluator, errors.h, 16 valid + 16 invalid 测试 |
+| **C** | 后端负责人 | IR 设计（Program/FunctionBuilder）、RISC-V32 CodeGen、优化器（常量折叠/死代码/分支简化/寄存器复用）、Text IR CLI、后端测试 | ir.hpp, riscv32_codegen.cpp, optimizer.cpp, text_ir.cpp |
+| **D** | 测试与集成负责人 | 自动化测试脚本、CI/CD 配置、Git 分支合并管理、实践报告汇总、OJ 评测数据分析、代行 B/C 模块接口集成 | smoke test, e2e test, CI, AstToIr（代行）, CMakeLists 集成 |
 
-```
-tests/
-├── basic/           # 11 个基础功能测试（表达式、变量、函数、控制流）
-├── control_flow/    # 5 个控制流专项测试（嵌套、break、continue）
-├── semantic/        # 32 个语义测试
-│   ├── valid/       # 16 个合法程序 → 应通过语义分析
-│   └── invalid/     # 16 个非法程序 → 应有对应错误码
-└── performance/     # 2 个性能基准测试（递归、循环）
-```
+---
 
-### 2.2 测试策略
+## 五、各模块关键实现
+
+### 5.1 词法分析（Lexer，A）
+
+- 采用**手工编码**的词法分析器，逐个字符扫描
+- 识别关键字（`int void const if else while break continue return`）、标识符、十进制整数、运算符、分隔符
+- 支持单行注释 `//` 和多行注释 `/* */`
+- Token 类型枚举定义在 `Token.h`，错误通过 `LexError` 异常类报告
+
+### 5.2 语法分析（Parser，A）
+
+- 采用**递归下降**分析法，每个非终结符对应一个解析方法
+- 严格按照 ToyC 文法实现运算符优先级（`||` < `&&` < 关系 < 加减 < 乘除 < 一元）
+- AST 节点分三级：`ASTNode`（基类）→ `Expr`/`Stmt` → 具体节点
+- 表达式节点：`BinaryExpr`, `UnaryExpr`, `Number`, `Identifier`, `FuncCall`
+- 语句节点：`Block`, `IfStmt`, `WhileStmt`, `BreakStmt`, `ContinueStmt`, `ReturnStmt`, `ExprStmt`, `AssignStmt`
+- 声明节点：`VarDecl`, `ConstDecl`, `FuncDef`, `Param`
+- 编译器单元：`CompUnit` 使用 `variant<VarDecl, ConstDecl, FuncDef>` 存储顶层元素
+- 表达式优先级通过分层递归实现：`parseExpr()` → `parseLOrExpr()` → `parseLAndExpr()` → `parseRelExpr()` → `parseAddExpr()` → `parseMulExpr()` → `parseUnaryExpr()` → `parsePrimaryExpr()`
+
+### 5.3 语义分析（SemanticAnalyzer，B + D 代修）
+
+- 实现 `ASTVisitor` 接口，遍历 AST 进行语义检查
+- **符号表**：采用 `vector<unordered_map<string, Symbol>>` 实现嵌套作用域栈，`pushScope()`/`popScope()` 管理进出作用域，`lookup()` 从内到外搜索，`lookupCurrentScope()` 检查重定义
+- **常量求值**：`ConstExprEvaluator` 递归计算常量表达式，支持算术运算、标识符常量化引用
+- **语义检查项**（15 类错误码）：未声明标识符、重定义、使用前声明、常量赋值、常量初始化非法、main 签名、返回路径、返回类型不匹配、void 函数作表达式、参数个数错误、循环外 break/continue、除零
+- **void 函数语句级调用**：通过 `FuncCall::isStatement` 字段区分表达式级和语句级调用，避免误报 `ERR_VOID_FUNC_CALL_EXPR`
+
+### 5.4 AST→IR 转换（AstToIr，D 代行 C）
+
+- 实现 `ASTVisitor`，遍历 AST 生成 `toyc::backend::Program`
+- **FunctionBuilder 使用**：每个 `FuncDef` 创建独立的 `FunctionBuilder`，参数通过 `addParameter()` 注册，局部变量通过 `createLocal()` 创建，临时值通过 `createTemporary()` 创建
+- **控制流**：`IfStmt` → `emitIf(cond, emit_then, emit_else)`，`WhileStmt` → `emitWhile(emit_condition, emit_body)`
+- **短路逻辑**：`&&` → `emitLogicalAnd(left, emit_right)`，`||` → `emitLogicalOr(left, emit_right)`，右侧仅在需要时计算
+- **表达式**：通过 `emitExpr()` 递归处理，`BinaryExpr` 映射 AST 运算符到 IR 运算符（`BinaryOp::Add` → `backend::BinaryOp::Add` 等）
+- **作用域管理**：Block 入口保存 `locals_` 副本，出口恢复，实现变量遮蔽和生命周期管理
+- **两遍 CompUnit**：第一遍收集所有全局声明（使函数可引用后续声明的全局），第二遍编译函数
+- **全局常量求值**：`evalGlobalInit()` 递归求值器支持跨常量引用（`const b = a + 1`）
+
+### 5.5 中间表示（IR，C）
+
+- 采用**三地址码**形式的线性 IR，定义在 `toyc::backend` 命名空间
+- `Value`：表示立即数（`Immediate`）、虚拟寄存器（`VirtualRegister`）、局部变量（`Local`）、全局变量（`Global`）
+- `Instruction`：8 种指令（Label, Copy, Unary, Binary, Jump, Branch, Call, Return）
+- `FunctionBuilder`：高层 API 封装了控制流结构化的标签和跳转生成，提供 `emitIf`、`emitWhile`、`emitLogicalAnd`、`emitLogicalOr` 等方法
+- `Program` = `vector<Global>` + `vector<Function>`
+
+### 5.6 RISC-V32 代码生成（CodeGen，C）
+
+- 目标架构：**RV32IM**（32 位基础整数 + 乘除法扩展）
+- **栈帧布局**：s0 为帧指针，函数入口 `mv t5, sp; addi sp, sp, -frame; sw ra, -4(t5); sw s0, -8(t5); mv s0, t5`
+- **局部变量/临时值**：全部通过栈槽（`lw`/`sw` 相对于 s0）分配，虚拟寄存器不分配 callee-saved 寄存器（简化策略，消除 `mv` 双链）
+- **函数调用**：前 8 个参数通过 `a0-a7` 传递，超出部分压栈；返回值通过 `a0` 传递
+- **控制流**：条件分支用 `slt` + `bnez`/`j` 实现，`while` 循环用 `j condition; condition: ...; body: ...; j condition; end:` 结构
+- **全局变量**：通过 `.data`/`.rodata` 段定义，`la t6, name; lw/sw reg, 0(t6)` 访问
+
+### 5.7 优化器（Optimizer，C）
+
+- **常量折叠**：编译期计算常量一元/二元运算，包括除零保护
+- **常量分支简化**：静态确定条件时直接跳转到目标
+- **死代码删除**：移除不再使用的临时值
+- 所有优化均为保守优化，不改变程序语义
+
+---
+
+## 六、测试策略与基础设施
+
+### 6.1 测试体系
 
 | 层级 | 说明 | 工具 |
 |------|------|------|
-| 冒烟测试 | 构建后验证编译器能输出非空汇编 | `run_smoke_tests.sh` + CTest |
-| 语义单元测试 | 编译期检查合法/非法语义样例 | `tests/test_semantic.cpp` + `tests/build_test.py` |
-| 端到端测试 | ToyC → RISC-V → 运行 → 对比退出码 | `run_e2e_tests.sh` |
-| 回归测试 | 每修复一个 bug 新增一个最小样例 | 持续积累 |
-| 优化回归 | `-opt` 前后退出码一致性检查 | `run_e2e_tests.sh --opt` |
-| 后端单元测试 | IR 优化 + RV32 代码生成验证 | `backend/tests/backend_tests.cpp` |
+| 冒烟测试 | 构建后验证编译器能输出非空汇编 | CTest + `run_smoke_tests.sh` |
+| 本地端到端 | 23 个自编用例：ToyC → RISC-V → QEMU → 对比退出码 | `run_e2e_tests.sh` |
+| 语义测试 | 15 合法 + 16 非法程序 | `test_semantic.cpp` |
+| OJ 在线评测 | 30 功能 + 12 性能测试用例 | 课程评测平台 |
+| CI/CD | 三阶段自动化：构建→冒烟→e2e正常→e2e优化 | GitHub Actions |
 
-### 2.3 期望值映射
+### 6.2 CI/CD 配置
 
-所有测试用例的期望退出码集中在 `tests/basic/expected.tsv`（TSV 格式），便于脚本批量读取和比对。
+`.github/workflows/ci.yml` 包含两个 Job：
 
----
+| Job | 触发条件 | 步骤 |
+|-----|------|------|
+| `build-and-smoke-test` | PR/推送 main/feature 分支 | checkout → cmake 构建 → CTest 冒烟测试 |
+| `e2e-tests` | 同上 | 构建 → 安装 RISC-V 工具链 → 普通模式 e2e → -opt 模式 e2e |
 
-## 三、自动化脚本
-
-### 3.1 冒烟测试（`scripts/run_smoke_tests.sh`）
-
-- CMake 配置 → 构建 → CTest → 编译器编译 `return_7.tc` → 验证输出非空
-- Day 1 起可用，CI 已配置（`.github/workflows/ci.yml`）
-- 支持 Windows（`.ps1`）和 Unix（`.sh`）
-
-### 3.2 端到端测试（`scripts/run_e2e_tests.sh`）
-
-- 遍历 `expected.tsv`，对每个 `.tc` 文件：编译 → 汇编 → 链接 → 运行 → 对比退出码
-- 支持 `--opt` 参数切换优化模式
-- 依赖 RISC-V 工具链（`riscv64-unknown-elf-gcc` + `qemu-riscv32`）
-
-### 3.3 冒烟辅助（`scripts/cmake/smoke_test.cmake`）
-
-- CMake 脚本模块，由 CTest 调用
-- 校验编译器退出码为 0、输出文件非空
-
-### 3.4 后端构建脚本（`backend/Makefile`）
-
-- 独立后端开发构建：`make` / `make test` / `make e2e` / `make clean`
-- 文本 IR 命令行工具：`make cli < tests/data/factorial.ir > factorial.s`
-- 支持 `-opt`、`--no-comments`、`-h` 参数
+端到端测试使用 `-nostdlib -nostartfiles -static` 链接，配合自定义 `_start.s` 入口（`call main → li a7,93 → ecall`），避免 64/32 位 CRT 不兼容和 PIE 动态链接问题。
 
 ---
 
-## 四、Git 集成流程
+## 七、OJ 评测数据
 
-### 4.1 分支策略
+### 7.1 四轮评测趋势
 
-| 分支 | 成员 | 职责 |
-|------|------|------|
-| `main` | D（合并） | 稳定分支，始终可构建 |
-| `feature/frontend` | A | 词法分析、语法分析、AST |
-| `feature/semantic` | B | 符号表、语义分析、常量求值 |
-| `backend` | C | IR 设计、RISC-V32 代码生成、优化 |
-| `test-opt-report` | D | 测试、优化、报告、集成 |
+| 轮次 | 功能得分 | 性能得分 | 总分 | 功能通过 | 主要修复 |
+|:---:|:---:|:---:|:---:|:---:|------|
+| 一 | 66.67 | 6.99 | 51.75 | 20/30 | 初始提交 |
+| 二 | 76.67 | 7.04 | 59.26 | 23/30 | Block 作用域 + 去寄存器分配 |
+| 三 | 93.33 | 6.36 | 71.59 | 28/30 | void 语义 + 全局常量链 + 两遍编译 |
+| 四 | 93.33 | 6.82 | 71.70 | 28/30 | 全局 lookup O(1) 优化 |
 
-### 4.2 合并流程
+### 7.2 功能测试详情（第 4 轮，28/30 通过）
 
-1. 成员在自己的分支上开发并推送
-2. D 创建 `integrate/<module>` 分支从功能分支
-3. 合并最新 `main` 到 integration 分支、解决冲突
-4. 构建验证通过后 `git merge --no-ff` 到 `main`
-5. 推送 `main`，成员从 `main` 同步最新代码
+通过的所有测试点（运行时间 3-76ms）：
 
-### 4.3 CI/CD
+f01_minimal, f02_assignment, f03_if_else, f04_while_break, f05_function_call, f06_break_continue, f07_scope_shadow_plus, f08_short_circuit, f09_func_name, **f10_void_fn**, f11_precedence, f12_division_check, f13_scope_block, f14_nested_if_while, f15_multiple_return_paths, f17_complex_expressions, f19_many_arguments, f20_comprehensive, **f21_global_var**, f22_global_const, f23_const_chain, **f24_void_return**, **f25_global_shadow**, f26_recursive_global, f27_decl_stmt, **f28_global_decl_func_mix**, **f29_global_const_chain**, f30_short_circuit_global_side_effect
 
-CI 配置在 `.github/workflows/ci.yml`，分三个阶段：
+未通过的测试点：
 
-| 阶段 | Job | 内容 | 状态 |
-|:---:|---|------|:---:|
-| 一 | `build-and-smoke-test` | CMake 构建 + CTest 冒烟测试 | ✅ |
-| 二 | `e2e-tests` (normal) | 安装 RISC-V 工具链 → 端到端测试（24 用例） | ✅ |
-| 三 | `e2e-tests` (opt) | 同上带 `-opt` 参数，验证优化后退出码一致 | ✅ |
+| 测试点 | 错误类型 | 分析 |
+|--------|:---:|------|
+| f16_complex_syntax | 编译器异常 | 需 OJ 测试用例定位（Parser 深度递归或语义误报） |
+| f18_many_variables | 编译器异常 | 需 OJ 测试用例定位（栈帧或符号表边界） |
 
-端到端测试使用 `-nostdlib` + 自定义 `_start` 入口避免 64/32 CRT 不兼容，参照 `backend/tests/rv32_e2e.sh` 的方案。
+### 7.3 性能测试详情（第 4 轮）
 
-触发器：PR 到 main、push 到 main/feature 分支、手动触发。
+| 测试点 | 结果 | 运行时间 | 性能占比 |
+|--------|:---:|:---:|:---:|
+| p01_const | 通过 | 7820ms | 5% |
+| p02_dead_code | 通过 | 13903ms | 3% |
+| p03_copy | 通过 | 8652ms | 5% |
+| p04_common_subexpr | 通过 | 6103ms | 10% |
+| p05_algebra | 通过 | 7387ms | 5% |
+| p06_tail_recursion | 通过 | 3861ms | 15% |
+| p07_loop | **超时** | — | — |
+| p08_basic_combined | **超时** | — | — |
+| p09_advanced_graph | **超时** | — | — |
+| p10_advanced_matrix | **超时** | — | — |
+| p11_global_const_prop | 通过 | 9237ms | 19% |
+| p12_const_expr_chain | 通过 | — | — |
 
----
+### 7.4 功能分修复明细
 
-## 五、优化设计
-
-### 5.1 优化 Pass 列表
-
-| 优化 | 说明 | 安全性 | 状态 |
-|------|------|--------|------|
-| 常量折叠 | 编译期计算常量表达式（含一元/二元运算） | 安全 | 已实现 |
-| 常量分支简化 | 静态确定条件时移除无效分支 | 安全 | 已实现 |
-| 死代码删除 | 移除无用临时值 | 安全 | 已实现 |
-| 基础寄存器复用 | 减少不必要的栈读写 | 需验证 | 已实现 |
-| 跳转合并 | 合并连续跳转指令 | 安全 | 计划中 |
-
-### 5.2 优化回归保护
-
-- 所有优化必须通过 `run_e2e_tests.sh --opt` 回归测试
-- 优化前后程序退出码必须一致
-- 优化可逐项开关（`-opt` 参数下各 Pass 可独立启用/禁用）
-- 后端优化器位于 `backend/src/optimizer.cpp`，支持 `-opt` 命令行参数
+| 修复 | 涉及的 Issue | 影响测试 | 功能分提升 |
+|------|:---:|------|:---:|
+| Block 作用域 save/restore | #13 | f07, f13, f25 | +10 |
+| void 函数 `isStatement` 语义检查 | #16 | f10, f24 | +6.67 |
+| 全局常量链 `evalGlobalInit` 求值 | #17 | f29 | +3.33 |
+| 两遍 CompUnit 全局优先 | #18 | f21, f28 | +6.67 |
 
 ---
 
-## 六、当前状态与已知限制
+## 八、集成过程中的关键问题与解决
 
-### 6.1 模块完成度（Day 4 末）
+在从各成员分支集成到 main 的过程中，D 成员共记录 **18 个 Issue**（详见 `docs/issue-report.md`）。关键问题包括：
 
-| 模块 | 完成度 | 备注 |
-|------|--------|------|
-| 前端（A） | ~98% | Lexer+Parser+AST 完整，AstPrinter 配套完善 |
-| 语义（B） | ~85% | 逻辑完整，接口适配由D代行修复（visit签名/枚举/字段名） |
-| 后端（C） | ~90% | IR+CodeGen+Optimizer 完整，AST→IR转换和主构建集成由D代行 |
-| 测试/集成（D）| ~70% | 编译管线已串联，CI三阶段配置完成，端到端测试待通过 |
+1. **B 未适配 A 的 AST 变更**（Issue #1-4）：A 的 Day3 重构将 ASTVisitor 签名从指针改为 const 引用、枚举从嵌套改为命名空间级、字段名和 Type 方法名变更，B 的语义分析模块未同步更新。D 代行修复了 `SemanticAnalyzer` 和 `ConstExprEvaluator` 的接口适配。
 
-### 6.2 已解决的关键阻塞
+2. **C 的 AST→IR 转换器缺失**（Issue #5）：C 完成了 IR 设计和 `FunctionBuilder` 高层 API，但未实现遍历 AST 生成 IR 的代码。D 代行实现了完整的 `AstToIr` 模块。
 
-- **编译管线串联**（D 代行）：main.cpp 现已串联 Lexer→Parser→Semantic→AST→IR→Optimize→CodeGen→stdout
-- **AST→IR 转换器**（D 代行 C）：新建 `src/codegen/AstToIr.cpp`，实现 ASTVisitor 将前端 AST 转为后端 IR
-- **B 接口适配**（D 代行）：SemanticAnalyzer.h/.cpp visit 签名从指针改为 const&，字段名/枚举值/Type方法全部对齐 A 的 AST
-- **CI 三阶段**：冒烟测试 + 端到端测试 + 优化回归，使用 `-nostdlib` 解决 64/32 CRT 不兼容
-- **后端接入主构建**：CMakeLists.txt 整合 backend 源文件和 include 路径
+3. **e2e 测试环境兼容性**（Issue #8-10）：CI 使用 `riscv64-linux-gnu-gcc`（64 位工具链）编译 32 位 RISC-V 程序，遇到 CRT 不兼容、PIE 动态链接、section 重叠等问题。通过 `-nostdlib -nostartfiles -static --build-id=none` + 自定义 `_start.s` 解决。
 
-### 6.3 待处理
-
-- [ ] 端到端测试全部通过（24 用例，当前 `-nostdlib` 修复已推送，待 CI 验证）
-- [ ] `-opt` 回归测试全部通过
-- [ ] 优化效果记录（汇编行数、运行时间等数据）
-- [ ] 清理临时文件（`.idea/`, `compile_err.txt`, `*.bak`）
-- [ ] README 构建和运行命令可复现性验证
-- [ ] 实践报告补充测试结果和优化数据
+4. **OJ 评测反馈驱动修复**（Issue #12-18）：四轮 OJ 评测共发现 6 个代码缺陷和 3 个测试用例错误，功能分从 66.67 提升至 93.33。
 
 ---
 
-## 附录 A：团队成员分工
+## 九、总结
 
-| 成员 | 职责 | 主要交付 |
-|------|------|----------|
-| A | 前端 | Lexer、Parser、AST、AstPrinter（重构为 ASTBase.h + AST.h） |
-| B | 语义分析 | SymbolTable、SemanticAnalyzer（已适配 ASTVisitor）、ConstExprEvaluator |
-| C | 后端 | IR（toyc::backend::Program）、RISC-V32 CodeGen、Optimizer、TextIR CLI |
-| D | 测试/集成 | 测试脚本、CI、分支合并、报告汇总、优化验证 |
+### 9.1 项目成果
 
-## 附录 B：关键文件索引
+- 实现了一个功能完整的 ToyC→RISC-V32 编译器，覆盖词法分析、语法分析、语义分析、IR 生成、代码生成和基础优化
+- 经过四轮 OJ 评测，功能测试 28/30 通过（93.33 分），性能测试 6.82 分，总分 71.70
+- 建立了完善的测试基础设施：58 个测试用例、自动化 CI/CD、端到端测试脚本
+- 完成了详细的实践报告和问题跟踪文档
+
+### 9.2 已知限制
+
+1. **性能瓶颈**：寄存器分配采用全栈策略，未利用 callee-saved 寄存器减少访存，导致循环密集型程序超时
+2. **优化覆盖有限**：优化器仅实现常量折叠和死代码删除，无循环优化、内联、公共子表达式消除
+3. **f16/f18 未修复**：因 OJ 平台不提供测试源码，无法定位这两个失败的根因
+4. **语义测试未接入 CI**：B 提供的语义测试（15 合法 + 16 非法）未纳入自动化测试流程
+
+### 9.3 经验与反思
+
+1. **接口先行，文档同步**：A 的 Day3 AST 重构虽有文档说明，但 B 和 C 未及时同步。建议公共接口变更后立即在群内通知，并要求成员在下次合并前验证适配
+2. **每日合并，积小为大**：项目遵循了"每日合并可构建版本"的原则，避免了最后一天集中集成
+3. **CI 是集成质量的保障**：GitHub Actions 在每次推送时自动构建和测试，在缺少本地编译环境的情况下提供了关键的反馈循环
+4. **OJ 评测是最终检验**：本地测试用例无法完全覆盖 OJ 的测试集，四轮 OJ 反馈驱动的修复显著提升了功能通过率
+
+---
+
+## 附录 A：关键文件索引
 
 | 文件 | 说明 |
 |------|------|
-| `src/ast/ASTBase.h` | AST 基类（ASTNode, Expr, Stmt）+ SourceLocation |
-| `src/ast/AST.h` | 全部 AST 节点定义 + ASTVisitor 接口 |
-| `src/ast/Type.h` | 类型系统（Int/Void） |
-| `src/semantic/SemanticAnalyzer.h` | 语义分析器（实现 ASTVisitor） |
-| `src/semantic/SymbolTable.h` | 嵌套作用域符号表 |
-| `src/semantic/ConstExprEvaluator.h` | 常量表达式求值 |
-| `backend/include/toyc/backend/ir.hpp` | 后端 IR 定义 |
-| `backend/include/toyc/backend/optimizer.hpp` | IR 优化器 |
-| `backend/src/riscv32_codegen.cpp` | RISC-V32 代码生成 |
-| `Day3更新说明.md` | 前端 AST 字段详解与调用指南 |
-| `Semantic.md` | 语义分析模块设计文档 |
-| `FrontEnd.md` | 前端实现文档 |
+| `src/lexer/Lexer.h/.cpp` | 词法分析器 |
+| `src/parser/Parser.h/.cpp` | 递归下降语法分析器 |
+| `src/ast/AST.h`, `ASTBase.h`, `Type.h` | AST 节点定义与 Visitor 接口 |
+| `src/semantic/SemanticAnalyzer.h/.cpp` | 语义分析器（ASTVisitor 实现） |
+| `src/semantic/SymbolTable.h/.cpp` | 嵌套作用域符号表 |
+| `src/semantic/ConstExprEvaluator.h/.cpp` | 常量表达式求值器 |
+| `src/codegen/AstToIr.h/.cpp` | AST→IR 转换器（ASTVisitor 实现） |
+| `backend/include/toyc/backend/ir.hpp` | 后端 IR 定义（Program, FunctionBuilder） |
+| `backend/src/riscv32_codegen.cpp` | RISC-V32 代码生成器 |
+| `backend/src/optimizer.cpp` | IR 优化器 |
+| `src/main.cpp` | 编译器入口，串联完整管线 |
+| `scripts/run_e2e_tests.sh` | 端到端测试脚本 |
+| `.github/workflows/ci.yml` | CI/CD 配置 |
+
+## 附录 B：OJ 评测数据文档
+
+- `docs/第一次测试数据收集.md`（第一轮：51.75 分）
+- `docs/第二次测试数据收集.md`（第二轮：59.26 分）
+- `docs/第三次测试数据收集.md`（第三轮：71.59 分）
+- `docs/issue-report.md`（18 个 Issue 完整记录与责任分析）
