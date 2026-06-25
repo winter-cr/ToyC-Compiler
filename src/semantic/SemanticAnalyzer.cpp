@@ -437,7 +437,7 @@ void SemanticAnalyzer::visit(const FuncCall& node) {
             arg->accept(*this);
         }
     }
-    if (!funcSym->returnsInt) {
+    if (!funcSym->returnsInt && !node.isStatement) {
         if (!currentFunction_ || currentFunction_->returnType->is_int()) {
             error(node.line, node.column,
                   SemanticErrorCode::ERR_VOID_FUNC_CALL_EXPR,
