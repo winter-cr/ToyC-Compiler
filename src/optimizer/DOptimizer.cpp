@@ -38,22 +38,14 @@ void threadJumps(std::vector<Instruction>& instrs) {
         }
     }
 
-    // Build jump target → target-of-target map
+    // Build jump target → target-of-target map.
+    // Only thread when a label is immediately followed by a single jump
+    // (i.e., the label is just an alias — no real code between).
     std::unordered_map<std::string, std::string> jump_redirect;
-    for (size_t i = 0; i < instrs.size(); ++i) {
-        if (instrs[i].kind == InstructionKind::Label) {
-            // If the only instruction before the next label/branch is a jump,
-            // record the redirection.
-            size_t j = i + 1;
-            while (j < instrs.size() &&
-                   instrs[j].kind != InstructionKind::Label &&
-                   instrs[j].kind != InstructionKind::Jump &&
-                   instrs[j].kind != InstructionKind::Branch) {
-                ++j;
-            }
-            if (j < instrs.size() && instrs[j].kind == InstructionKind::Jump) {
-                jump_redirect[instrs[i].label] = instrs[j].label;
-            }
+    for (size_t i = 0; i + 1 < instrs.size(); ++i) {
+        if (instrs[i].kind == InstructionKind::Label &&
+            instrs[i + 1].kind == InstructionKind::Jump) {
+            jump_redirect[instrs[i].label] = instrs[i + 1].label;
         }
     }
 
