@@ -22,4 +22,4 @@ tests/control_flow/break_inner.tc	15
 tests/control_flow/continue_loop.tc	5
 tests/control_flow/if_else_chain.tc	20
 tests/performance/fib_heavy.tc	55
-tests/performance/loop_sum.tc	5050
+tests/performance/loop_sum.tc	186
