@@ -2,6 +2,7 @@
 #include "codegen/AstToIr.h"
 #include "lexer/LexError.h"
 #include "lexer/Lexer.h"
+#include "optimizer/DOptimizer.h"
 #include "parser/Parser.h"
 #include "semantic/SemanticAnalyzer.h"
 #include "toyc/backend/optimizer.hpp"
@@ -90,15 +91,25 @@ int main(int argc, char* argv[]) {
         toyc::AstToIr ast2ir;
         auto program = ast2ir.convert(ast.get());
 
-        // 4. Optional optimization
+        // 4. Optimization pipeline
+        toyc::DOptimizer d_opt;
         if (optimize) {
+            // C: IR-level constant folding / dead code / branch simplification
             program = toyc::backend::optimize(std::move(program));
+            // D: IR jump threading + dead jump removal + copy elimination
+            program = d_opt.optimizeIR(std::move(program));
         }
 
         // 5. Code generation
         toyc::backend::CodegenOptions options;
         options.emit_comments = env_enabled("TOYC_EMIT_COMMENTS");
-        std::cout << toyc::backend::RiscV32CodeGenerator{options}.generate(program);
+        auto assembly = toyc::backend::RiscV32CodeGenerator{options}.generate(program);
+
+        // 6. D: Assembly-level peephole optimization
+        if (optimize) {
+            assembly = d_opt.optimizeAssembly(std::move(assembly));
+        }
+        std::cout << assembly;
 
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';

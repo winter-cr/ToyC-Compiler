@@ -18,6 +18,7 @@ add_executable(toyc
     src/semantic/SemanticAnalyzer.cpp
     src/semantic/ConstExprEvaluator.cpp
     src/codegen/AstToIr.cpp
+    src/optimizer/DOptimizer.cpp
     backend/src/ir.cpp
     backend/src/optimizer.cpp
     backend/src/riscv32_codegen.cpp
