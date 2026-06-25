@@ -91,7 +91,7 @@ run_test() {
     # 2. 汇编 + 链接（nostdlib+static 避免 64/32 CRT 不兼容，-static 避免 PIE 动态链接）
     if ! "$RISCV_GCC" -march=rv32im -mabi=ilp32 \
          -nostdlib -nostartfiles -static \
-         -Wl,-e,_start -Wl,-Ttext=0x10000 \
+         -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
          -o "$exe_file" "$OUT_DIR/_start.s" "$asm_file" 2>"$OUT_DIR/${base}.linkerr"; then
         echo "  [FAIL] $tc_file — assembler/linker failed"
         FAIL=$((FAIL + 1))
