@@ -99,6 +99,31 @@ jobs:
             -o build/e2e_out/simple100.elf build/e2e_out/_start.s build/e2e_out/simple100.s 2>&1
           qemu-riscv32 build/e2e_out/simple100.elf 2>/dev/null
           echo "exit_simple100: $?"
+          # Two vars, no cross-dependency: i and j both +1
+          cat > /tmp/two_vars.tc <<'TC'
+          int main() { int i=0; int j=0; while(i<100){i=i+1;j=j+1;} return j; }
+          TC
+          echo "=== two_vars (expect 100) ==="
+          build/toyc < /tmp/two_vars.tc > build/e2e_out/two_vars.s 2>&1
+          cat build/e2e_out/two_vars.s
+          riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 \
+            -nostdlib -nostartfiles -static \
+            -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
+            -o build/e2e_out/two_vars.elf build/e2e_out/_start.s build/e2e_out/two_vars.s 2>&1
+          qemu-riscv32 build/e2e_out/two_vars.elf 2>/dev/null
+          echo "exit_two_vars: $?"
+          # Two vars, cross-dependency with small bound
+          cat > /tmp/cross50.tc <<'TC'
+          int main() { int i=0; int s=0; while(i<50){i=i+1;s=s+i;} return s; }
+          TC
+          echo "=== cross50 (expect 1275) ==="
+          build/toyc < /tmp/cross50.tc > build/e2e_out/cross50.s 2>&1
+          riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 \
+            -nostdlib -nostartfiles -static \
+            -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
+            -o build/e2e_out/cross50.elf build/e2e_out/_start.s build/e2e_out/cross50.s 2>&1
+          qemu-riscv32 build/e2e_out/cross50.elf 2>/dev/null
+          echo "exit_cross50: $?"
           # loop_sum
           echo "=== loop_sum ==="
           build/toyc < tests/performance/loop_sum.tc > build/e2e_out/test_ls.s 2>&1
