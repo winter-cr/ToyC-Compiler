@@ -1,7 +1,6 @@
 #pragma once
 
-#include "ast/CompUnit.h"
-#include "ast/Type.h"
+#include "ast/AST.h"
 #include "lexer/Token.h"
 
 #include <memory>
@@ -29,7 +28,7 @@ class Parser {
 public:
     explicit Parser(const std::vector<Token>& tokens);
 
-    std::unique_ptr<CompUnit> parse();
+    std::unique_ptr<toyc::CompUnit> parse();
     const std::vector<ParseError>& errors() const { return errors_; }
     bool has_errors() const { return !errors_.empty(); }
 
@@ -50,28 +49,29 @@ private:
     SourceLocation current_loc() const;
     SourceLocation previous_loc() const;
 
-    std::unique_ptr<CompUnit> parse_comp_unit();
-    TopLevelItem parse_top_level_item();
-    std::unique_ptr<VarDecl> parse_var_decl(bool is_global);
-    std::unique_ptr<ConstDecl> parse_const_decl(bool is_global);
-    std::unique_ptr<FuncDef> parse_func_def(Type* return_type);
-    std::unique_ptr<Param> parse_param();
-    std::unique_ptr<BlockStmt> parse_block();
-    std::unique_ptr<Stmt> parse_stmt();
-    std::unique_ptr<Stmt> parse_if_stmt();
-    std::unique_ptr<Stmt> parse_while_stmt();
-    std::unique_ptr<Stmt> parse_return_stmt();
+    std::unique_ptr<toyc::CompUnit> parse_comp_unit();
+    toyc::TopLevelElement parse_top_level_item();
+    std::unique_ptr<toyc::VarDecl> parse_var_decl(bool is_global);
+    std::unique_ptr<toyc::ConstDecl> parse_const_decl(bool is_global);
+    std::unique_ptr<toyc::FuncDef> parse_func_def(toyc::Type* return_type);
+    std::unique_ptr<toyc::Param> parse_param();
+    std::unique_ptr<toyc::Block> parse_block();
+    std::unique_ptr<toyc::Stmt> parse_stmt();
+    std::unique_ptr<toyc::Stmt> parse_if_stmt();
+    std::unique_ptr<toyc::Stmt> parse_while_stmt();
+    std::unique_ptr<toyc::Stmt> parse_return_stmt();
 
-    std::unique_ptr<Expr> parse_expr();
-    std::unique_ptr<Expr> parse_lor_expr();
-    std::unique_ptr<Expr> parse_land_expr();
-    std::unique_ptr<Expr> parse_rel_expr();
-    std::unique_ptr<Expr> parse_add_expr();
-    std::unique_ptr<Expr> parse_mul_expr();
-    std::unique_ptr<Expr> parse_unary_expr();
-    std::unique_ptr<Expr> parse_primary_expr();
+    std::unique_ptr<toyc::Expr> parse_expr();
+    std::unique_ptr<toyc::Expr> parse_lor_expr();
+    std::unique_ptr<toyc::Expr> parse_land_expr();
+    std::unique_ptr<toyc::Expr> parse_rel_expr();
+    std::unique_ptr<toyc::Expr> parse_add_expr();
+    std::unique_ptr<toyc::Expr> parse_mul_expr();
+    std::unique_ptr<toyc::Expr> parse_unary_expr();
+    std::unique_ptr<toyc::Expr> parse_primary_expr();
 
-    TopLevelItem make_error_var_decl();
+    toyc::TopLevelElement make_error_var_decl();
+    std::unique_ptr<toyc::Stmt> wrap_in_block(std::unique_ptr<toyc::Stmt> stmt);
 
     const std::vector<Token>& tokens_;
     size_t current_ = 0;

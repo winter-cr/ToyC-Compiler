@@ -10,11 +10,7 @@ add_executable(toyc
     src/lexer/Token.cpp
     src/lexer/Lexer.cpp
     src/ast/Type.cpp
-    src/ast/Expr.cpp
-    src/ast/Decl.cpp
-    src/ast/Stmt.cpp
-    src/ast/FuncDef.cpp
-    src/ast/CompUnit.cpp
+    src/ast/AST.cpp
     src/ast/AstPrinter.cpp
     src/parser/Parser.cpp
     src/semantic/Symbol.cpp

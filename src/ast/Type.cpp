@@ -1,5 +1,7 @@
 #include "ast/Type.h"
 
+namespace toyc {
+
 Type::Type(TypeKind kind, std::string name) : kind_(kind), name_(std::move(name)) {}
 
 Type* Type::intType() {
@@ -11,3 +13,5 @@ Type* Type::voidType() {
     static Type instance(TypeKind::Void, "void");
     return &instance;
 }
+
+} // namespace toyc
