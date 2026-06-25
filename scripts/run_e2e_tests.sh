@@ -56,6 +56,16 @@ done
 # ---- 初始化 ----
 mkdir -p "$OUT_DIR"
 
+# 最小 _start 入口：调用 main，然后用 exit 系统调用退出
+cat > "$OUT_DIR/_start.s" <<'ASM'
+  .section .text.start
+  .globl _start
+_start:
+  call main
+  li a7, 93
+  ecall
+ASM
+
 PASS=0
 FAIL=0
 
@@ -78,8 +88,11 @@ run_test() {
         return
     fi
 
-    # 2. 汇编 + 链接
-    if ! "$RISCV_GCC" -march=rv32im -mabi=ilp32 -static -o "$exe_file" "$asm_file" 2>"$OUT_DIR/${base}.linkerr"; then
+    # 2. 汇编 + 链接（nostdlib 避免 64/32 CRT 不兼容）
+    if ! "$RISCV_GCC" -march=rv32im -mabi=ilp32 \
+         -nostdlib -nostartfiles \
+         -Wl,-e,_start -Wl,-Ttext=0x10000 \
+         -o "$exe_file" "$OUT_DIR/_start.s" "$asm_file" 2>"$OUT_DIR/${base}.linkerr"; then
         echo "  [FAIL] $tc_file — assembler/linker failed"
         FAIL=$((FAIL + 1))
         $VERBOSE && cat "$OUT_DIR/${base}.linkerr" >&2
