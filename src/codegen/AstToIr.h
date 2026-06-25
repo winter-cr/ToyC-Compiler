@@ -47,7 +47,7 @@ private:
 
     // Per-function state
     std::unordered_map<std::string, toyc::backend::Value> locals_;
-    std::vector<toyc::backend::Global> pending_globals_;
+    std::unordered_map<std::string, bool> global_names_;  // O(1) lookup
     std::string current_func_name_;
 };
 

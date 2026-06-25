@@ -8,7 +8,7 @@ AstToIr::AstToIr() = default;
 
 backend::Program AstToIr::convert(CompUnit* ast) {
     program_ = backend::Program{};
-    pending_globals_.clear();
+    global_names_.clear();
     if (ast) {
         ast->accept(*this);
     }
@@ -47,15 +47,8 @@ std::optional<backend::Value> AstToIr::lookup(const std::string& name) const {
     if (it != locals_.end()) {
         return it->second;
     }
-    for (const auto& g : program_.globals) {
-        if (g.name == name) {
-            return backend::Value::global(name);
-        }
-    }
-    for (const auto& g : pending_globals_) {
-        if (g.name == name) {
-            return backend::Value::global(name);
-        }
+    if (global_names_.count(name)) {
+        return backend::Value::global(name);
     }
     return std::nullopt;
 }
@@ -189,6 +182,7 @@ void AstToIr::visit(const VarDecl& node) {
             }
         }
         program_.globals.push_back(backend::Global{node.name, initVal, false});
+        global_names_[node.name] = true;
     } else {
         if (builder_) {
             backend::Value local = builder_->createLocal(node.name);
@@ -210,6 +204,7 @@ void AstToIr::visit(const ConstDecl& node) {
             }
         }
         program_.globals.push_back(backend::Global{node.name, initVal, true});
+        global_names_[node.name] = true;
     } else {
         if (builder_) {
             backend::Value local = builder_->createLocal(node.name);
