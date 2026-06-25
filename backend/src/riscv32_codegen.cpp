@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace toyc::backend {
 namespace {
@@ -34,35 +35,70 @@ struct SlotKeyHash {
 };
 
 using SlotMap = std::unordered_map<SlotKey, std::int32_t, SlotKeyHash>;
+using RegisterMap = std::unordered_map<SlotKey, std::string, SlotKeyHash>;
 
 void collectValue(const std::optional<Value>& value, SlotMap& slots,
-                  std::int32_t& next_offset) {
+                  const RegisterMap& registers, std::int32_t& next_offset) {
     if (!value ||
         (value->kind != ValueKind::Local &&
          value->kind != ValueKind::VirtualRegister)) {
         return;
     }
     const SlotKey key{value->kind, value->id};
+    if (registers.count(key)) {
+        return;
+    }
     if (!slots.count(key)) {
         slots.emplace(key, next_offset);
         next_offset -= 4;
     }
 }
 
-SlotMap assignSlots(const Function& function, std::int32_t& frame_size) {
+void collectVirtualRegister(const std::optional<Value>& value,
+                            RegisterMap& registers) {
+    static const std::vector<std::string> available{
+        "s1", "s2", "s3", "s4", "s5", "s6",
+        "s7", "s8", "s9", "s10", "s11",
+    };
+    if (!value || value->kind != ValueKind::VirtualRegister) {
+        return;
+    }
+    const SlotKey key{value->kind, value->id};
+    if (!registers.count(key) && registers.size() < available.size()) {
+        registers.emplace(key, available[registers.size()]);
+    }
+}
+
+RegisterMap assignRegisters(const Function& function) {
+    RegisterMap registers;
+    for (const auto& instruction : function.instructions) {
+        collectVirtualRegister(instruction.destination, registers);
+        collectVirtualRegister(instruction.left, registers);
+        collectVirtualRegister(instruction.right, registers);
+        for (const auto& argument : instruction.arguments) {
+            collectVirtualRegister(argument, registers);
+        }
+    }
+    return registers;
+}
+
+SlotMap assignSlots(const Function& function, const RegisterMap& registers,
+                    std::int32_t& frame_size) {
     SlotMap slots;
-    std::int32_t next_offset = -12; // -4: ra, -8: previous s0
+    // -4: ra, -8: previous s0, followed by allocated callee-saved registers.
+    std::int32_t next_offset =
+        -12 - static_cast<std::int32_t>(registers.size() * 4);
 
     for (const auto& parameter : function.parameters) {
         collectValue(Value::local(parameter.local_id, parameter.name), slots,
-                     next_offset);
+                     registers, next_offset);
     }
     for (const auto& instruction : function.instructions) {
-        collectValue(instruction.destination, slots, next_offset);
-        collectValue(instruction.left, slots, next_offset);
-        collectValue(instruction.right, slots, next_offset);
+        collectValue(instruction.destination, slots, registers, next_offset);
+        collectValue(instruction.left, slots, registers, next_offset);
+        collectValue(instruction.right, slots, registers, next_offset);
         for (const auto& argument : instruction.arguments) {
-            collectValue(argument, slots, next_offset);
+            collectValue(argument, slots, registers, next_offset);
         }
     }
 
@@ -114,12 +150,25 @@ void emitSpAdjustment(std::ostringstream& output, std::int32_t amount) {
 }
 
 void loadValue(std::ostringstream& output, const Value& value,
-               const std::string& destination, const SlotMap& slots) {
+               const std::string& destination, const SlotMap& slots,
+               const RegisterMap& registers) {
     switch (value.kind) {
     case ValueKind::Immediate:
         output << "  li " << destination << ", " << value.immediate << "\n";
         break;
-    case ValueKind::VirtualRegister:
+    case ValueKind::VirtualRegister: {
+        const auto iterator =
+            registers.find(SlotKey{value.kind, value.id});
+        if (iterator != registers.end()) {
+            if (iterator->second != destination) {
+                output << "  mv " << destination << ", " << iterator->second
+                       << "\n";
+            }
+            break;
+        }
+        emitStackLoad(output, destination, slotOffset(value, slots));
+        break;
+    }
     case ValueKind::Local:
         emitStackLoad(output, destination, slotOffset(value, slots));
         break;
@@ -131,9 +180,22 @@ void loadValue(std::ostringstream& output, const Value& value,
 }
 
 void storeValue(std::ostringstream& output, const Value& destination,
-                const std::string& source, const SlotMap& slots) {
+                const std::string& source, const SlotMap& slots,
+                const RegisterMap& registers) {
     switch (destination.kind) {
-    case ValueKind::VirtualRegister:
+    case ValueKind::VirtualRegister: {
+        const auto iterator =
+            registers.find(SlotKey{destination.kind, destination.id});
+        if (iterator != registers.end()) {
+            if (iterator->second != source) {
+                output << "  mv " << iterator->second << ", " << source
+                       << "\n";
+            }
+            break;
+        }
+        emitStackStore(output, source, slotOffset(destination, slots));
+        break;
+    }
     case ValueKind::Local:
         emitStackStore(output, source, slotOffset(destination, slots));
         break;
@@ -191,7 +253,8 @@ void emitBinary(std::ostringstream& output, BinaryOp op) {
 void emitFunction(std::ostringstream& output, const Function& function,
                   const CodegenOptions& options) {
     std::int32_t frame_size = 0;
-    const auto slots = assignSlots(function, frame_size);
+    const auto registers = assignRegisters(function);
+    const auto slots = assignSlots(function, registers, frame_size);
     const auto epilogue = ".L_" + function.name + "_epilogue";
 
     output << "\n  .text\n"
@@ -207,8 +270,12 @@ void emitFunction(std::ostringstream& output, const Function& function,
     output << "  mv t5, sp\n";
     emitSpAdjustment(output, -frame_size);
     output << "  sw ra, -4(t5)\n"
-           << "  sw s0, -8(t5)\n"
-           << "  mv s0, t5\n";
+           << "  sw s0, -8(t5)\n";
+    for (std::size_t index = 0; index < registers.size(); ++index) {
+        output << "  sw s" << index + 1 << ", "
+               << -12 - static_cast<std::int32_t>(index * 4) << "(t5)\n";
+    }
+    output << "  mv s0, t5\n";
 
     for (std::size_t index = 0; index < function.parameters.size(); ++index) {
         const auto parameter =
@@ -236,29 +303,32 @@ void emitFunction(std::ostringstream& output, const Function& function,
             output << instruction.label << ":\n";
             break;
         case InstructionKind::Copy:
-            loadValue(output, *instruction.left, "t0", slots);
-            storeValue(output, *instruction.destination, "t0", slots);
+            loadValue(output, *instruction.left, "t0", slots, registers);
+            storeValue(output, *instruction.destination, "t0", slots,
+                       registers);
             break;
         case InstructionKind::Unary:
-            loadValue(output, *instruction.left, "t0", slots);
+            loadValue(output, *instruction.left, "t0", slots, registers);
             if (*instruction.unary_op == UnaryOp::Negate) {
                 output << "  neg t2, t0\n";
             } else {
                 output << "  seqz t2, t0\n";
             }
-            storeValue(output, *instruction.destination, "t2", slots);
+            storeValue(output, *instruction.destination, "t2", slots,
+                       registers);
             break;
         case InstructionKind::Binary:
-            loadValue(output, *instruction.left, "t0", slots);
-            loadValue(output, *instruction.right, "t1", slots);
+            loadValue(output, *instruction.left, "t0", slots, registers);
+            loadValue(output, *instruction.right, "t1", slots, registers);
             emitBinary(output, *instruction.binary_op);
-            storeValue(output, *instruction.destination, "t2", slots);
+            storeValue(output, *instruction.destination, "t2", slots,
+                       registers);
             break;
         case InstructionKind::Jump:
             output << "  j " << instruction.label << "\n";
             break;
         case InstructionKind::Branch:
-            loadValue(output, *instruction.left, "t0", slots);
+            loadValue(output, *instruction.left, "t0", slots, registers);
             output << "  bnez t0, " << instruction.label << "\n"
                    << "  j " << instruction.false_label << "\n";
             break;
@@ -272,7 +342,8 @@ void emitFunction(std::ostringstream& output, const Function& function,
             emitSpAdjustment(output, -outgoing_size);
 
             for (std::size_t index = 0; index < instruction.arguments.size(); ++index) {
-                loadValue(output, instruction.arguments[index], "t0", slots);
+                loadValue(output, instruction.arguments[index], "t0", slots,
+                          registers);
                 if (index < 8) {
                     output << "  mv a" << index << ", t0\n";
                 } else {
@@ -290,13 +361,14 @@ void emitFunction(std::ostringstream& output, const Function& function,
             output << "  call " << instruction.callee << "\n";
             emitSpAdjustment(output, outgoing_size);
             if (instruction.destination) {
-                storeValue(output, *instruction.destination, "a0", slots);
+                storeValue(output, *instruction.destination, "a0", slots,
+                           registers);
             }
             break;
         }
         case InstructionKind::Return:
             if (instruction.left) {
-                loadValue(output, *instruction.left, "a0", slots);
+                loadValue(output, *instruction.left, "a0", slots, registers);
             }
             output << "  j " << epilogue << "\n";
             break;
@@ -308,8 +380,12 @@ void emitFunction(std::ostringstream& output, const Function& function,
         output << "  j " << epilogue << "\n";
     }
     output << epilogue << ":\n"
-           << "  lw ra, -4(s0)\n"
-           << "  lw t6, -8(s0)\n"
+           << "  lw ra, -4(s0)\n";
+    for (std::size_t index = 0; index < registers.size(); ++index) {
+        output << "  lw s" << index + 1 << ", "
+               << -12 - static_cast<std::int32_t>(index * 4) << "(s0)\n";
+    }
+    output << "  lw t6, -8(s0)\n"
            << "  mv sp, s0\n"
            << "  mv s0, t6\n"
            << "  ret\n"

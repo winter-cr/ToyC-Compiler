@@ -1,0 +1,21 @@
+# Recursive factorial plus global storage. Expected process exit code: 120.
+global @counter 0
+
+function factorial
+param %l0 n
+binary %t0 le %l0 1
+branch %t0 .base .recursive
+label .base
+return 1
+label .recursive
+binary %t1 sub %l0 1
+call %t2 factorial %t1
+binary %t3 mul %l0 %t2
+return %t3
+end
+
+function main
+call %t0 factorial 5
+copy @counter %t0
+return %t0
+end
