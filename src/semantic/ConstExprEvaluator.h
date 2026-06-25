@@ -1,36 +1,28 @@
-#pragma once
+#ifndef TOYC_CONST_EXPR_EVALUATOR_H
+#define TOYC_CONST_EXPR_EVALUATOR_H
 
+#include "ast/AST.h"
+#include "semantic/SymbolTable.h"
 #include <optional>
-#include <string>
-#include "errors.h"
 
-namespace semantic {
-namespace ast {
-class Expr;
-}}
+namespace toyc {
 
-namespace semantic {
 
 class ConstExprEvaluator {
 public:
-    explicit ConstExprEvaluator(class SemanticAnalyzer* analyzer) : analyzer_(analyzer) {}
+    explicit ConstExprEvaluator(SymbolTable& symTable) : symTable_(symTable) {}
 
-    struct EvalResult {
-        std::optional<int> value;
-        SemanticErrorCode error;  // ERR_OK (0) means no error
-    };
-
-    EvalResult evaluate(ast::Expr* expr);
+    std::optional<int> evaluate(Expr* expr);
 
 private:
-    class SemanticAnalyzer* analyzer_;
+    SymbolTable& symTable_;
 
-    EvalResult evaluateIdentifier(const std::string& name, int line);
-    std::optional<int> evaluateUnary(const std::string& op, std::optional<int> operand, int line);
-    std::optional<int> evaluateBinary(const std::string& op, std::optional<int> left,
-                                      std::optional<int> right, int line);
-
-    bool shouldShortCircuit(const std::string& op, std::optional<int> left, bool& result);
+    std::optional<int> evalNumber(Number* node);
+    std::optional<int> evalIdentifier(Identifier* node);
+    std::optional<int> evalBinary(BinaryExpr* node);
+    std::optional<int> evalUnary(UnaryExpr* node);
 };
 
-} // namespace semantic
+} // namespace toyc
+
+#endif

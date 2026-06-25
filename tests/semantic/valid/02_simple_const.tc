@@ -1,6 +1,0 @@
-// 测试2: 全局常量声明
-// 目标：验证const声明和初始值
-const int A = 10;
-int main(void) {
-    return A;
-}

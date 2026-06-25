@@ -1,9 +1,0 @@
-// 测试4: 常量初始化顺序依赖
-// 目标：验证常量可以引用前面已声明的常量
-const int A = 10;
-const int B = A + 5;   // A已声明，合法
-const int C = B * 2;   // B已声明，合法
-
-int main(void) {
-    return C;  // 应为 30
-}

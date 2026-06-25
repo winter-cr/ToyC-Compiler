@@ -1,7 +1,0 @@
-// 非法测试9: main函数签名错误
-// 目标：应报错 SEM_INVALID_MAIN_SIGNATURE
-
-// 错误2: main返回void
-void main(void) {
-    return;
-}

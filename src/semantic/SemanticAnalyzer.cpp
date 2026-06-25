@@ -1,323 +1,555 @@
-#include "SemanticAnalyzer.h"
-#include "errors.h"
+#include "semantic/SemanticAnalyzer.h"
+#include "semantic/ConstExprEvaluator.h"
+#include <optional>
+#include <string>
+#include <memory>
 
-namespace semantic {
+namespace toyc {
 
-SemanticAnalyzer::SemanticAnalyzer() : constExprEval_(this) {
-}
+SemanticAnalyzer::SemanticAnalyzer() {}
 
-SemanticAnalyzer::~SemanticAnalyzer() {
-    reset();
-}
-
-void SemanticAnalyzer::reset() {
-    symbolTable_.reset();
+bool SemanticAnalyzer::analyze(CompUnit* root) {
+    if (!root) return false;
     errors_.clear();
+    hasMain_ = false;
     loopDepth_ = 0;
     currentFunction_ = nullptr;
+    root->accept(*this);
+ return !hasErrors();
 }
 
-bool SemanticAnalyzer::analyze(ast::ASTNode* root) {
-    reset();
-    if (root) {
-        auto* compUnit = dynamic_cast<ast::CompUnit*>(root);
-        if (!compUnit) {
-            addError(0, 0, SemanticErrorCode::ERR_UNDECLARED_IDENT, "invalid AST root");
-            return true;
-        }
-        visitCompUnit(compUnit);
-    }
-    return hasErrors();
+bool SemanticAnalyzer::hasErrors() const {
+    return !errors_.empty();
 }
 
-void SemanticAnaly::addError(int line, int column, SemanticErrorCode code, const std::string& msg) {
-    errors_.emplace_back(line, column, code, msg);
+const std::vector<SemanticError>& SemanticAnalyzer::errors() const {
+    return errors_;
 }
 
-Symbol* SemanticAnalyzer::lookupGlobal(const std::string& name) {
-    return symbolTable_.lookup(name);
+Symbol* SemanticAnalyzer::lookupGlobal(const std::string& name) const {
+    return const_cast<SymbolTable&>(symTable_).lookupGlobal(name);
 }
 
-Symbol* SemanticAnalyzer::lookupLocal(const std::string& name) {
-    return symbolTable_.lookup(name);
+Symbol* SemanticAnalyzer::lookupLocal(const std::string& name) const {
+    return const_cast<SymbolTable&>(symTable_).lookupCurrentScope(name);
 }
 
-bool SemanticAnalyzer::getConstantValue(const std::string& name,* out_value) {
+bool SemanticAnalyzer::getConstantValue(const std::string& name, int* outValue) const {
     Symbol* sym = lookupGlobal(name);
-    if (sym && sym->isConstant() && sym->getConstValue().has_value()) {
- *out_value = sym->getConstValue().value();
-        return true;
+    if (!sym) sym = lookupLocal(name);
+    if (!sym || !sym->isConst || !sym->constValue.has_value()) return false;
+    if (outValue) *outValue = sym->constValue.value();
+    return true;
+}
+
+void SemanticAnalyzer::error(int line, int col, SemanticErrorCode code,
+                              const std::string& msg) {
+    errors_.push_back({line, col, code, msg});
+}
+
+Symbol* SemanticAnalyzer::declareVar(const std::string& name, SymbolKind kind,
+                                      int line, bool isGlobal,
+                                      std::optional<int> constVal) {
+    auto sym = std::make_unique<Symbol>(name, kind, line, isGlobal);
+    sym->isConst = (kind == SymbolKind::GLOBAL_CONST ||
+                    kind == SymbolKind::LOCAL_CONST);
+    if (constVal.has_value()) {
+        sym->constValue = constVal;
     }
-    return false;
-void SemanticAnalyzer::visitCompUnit(ast::CompUnit* node) {
-    for (auto* decl : node->getGlobalDecls()) {
-        if (auto* varDecl = dynamic_cast<astVarDecl*>(decl)) {
-            visitVarDecl(varDecl, true);
-        } else if (auto* constDecl = dynamic_cast<ast::ConstDecl*>(decl)) {
-            visitConstDecl(constDecl, true);
+    if (kind == SymbolKind::FUNCTION) {
+        sym->isConst = false;
+    }
+    Symbol* raw = sym.get();
+    if (!symTable_.insert(std::move(sym))) {
+        Symbol* existing = symTable_.lookupCurrentScope(name);
+        if (existing) {
+            return nullptr; // redefinition
         }
     }
-    for (auto* func : node->getFunctions()) {
-        visitFuncDef(func);
-    }
-    checkMainFunction();
+    return raw;
 }
 
-void SemanticAnalyzer::visitVarDecl(ast::VarDecl* decl, bool isGlobal) {
-    if (symbolTable_.isDefinedInCurrentScope(decl->name)) {
-        addError(decl->line, decl->column, SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                "symbol '" + decl->name + "'defined in the same scope");
-        return;
-    }
-    auto sym = std::make_unique<Symbol>(
-        isGlobal ? SymbolKind::GLOBAL_VAR : SymbolKind::LOCAL_VAR,
-        decl->name, BasicType::INT, decl->isConst, decl->line);
-    symbolTable_.insert(std::move(sym));
+Symbol* SemanticAnalyzer::lookupSymbol(const std::string& name) {
+    return symTable_.lookup(name);
 }
 
-void SemanticAnalyzer::visitConstDecl(ast::ConstDecl* decl, bool isGlobal) {
-    (symbolTable_.isDefinedInCurrentScope(decl->name)) {
-        addError(decl->line, decl->column, SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                "symbol '" + decl->name + "' redefined in the same scope");
-        return;
+void SemanticAnalyzer::checkExpr(Expr* expr) {
+    if (expr) {
+        expr->accept(*this);
     }
-    if (!decl->initExpr) {
-        addError(decl->line, decl->column, SemanticErrorCode::ERR_CONST_INIT_UNDEFINED,
-                "const '" + decl->name + "' must have an initializer");
-        return;
-    }
-    auto evalResult constExprEval_.evaluate(decl->initExpr);
-    if (!evalResult.value.has_value()) {
-        addError(decl->line, decl->column, evalResult.error,
-                "const '" + decl->name + "' initializer is not a constant expression");
-        return;
-    }
-    int value = evalResult.value.value();
-    auto sym = std::make_unique<Symbol>(
-        isGlobal ? SymbolKind::GLOBAL_CONST : SymbolKind::LOCAL_CONST,
- decl->name, BasicType::INT, true, decl->line);
-    sym->constValue = value;
-    symbolTable_.insert(std::move(sym));
 }
 
-void SemanticAnalyzer::visitFuncDef(ast::FuncDef* func) {
-    ifsymbolTable_.lookup(func->name)) {
-        addError(func->line, 0, SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                "function '" + func->name + "' redefined");
-        return;
-    }
-    BasicType retType = BasicType::INT;
-    if (func->returnType && func->returnType->isVoid) {
-        retType = BasicType::VOID;
-    }
-    std::vector<std::pair<std::string, BasicType>> params;
-    for (auto* param : func->params) {
-        params.emplace_back(param->name, BasicType::INT);
-    }
-    auto sym = Symbol::createFunction(func->name, retType, std::move(params), func->line);
-    symbolTable_.insert(std::move(sym));
+std::optional<int> SemanticAnalyzer::evaluateConstExpr(Expr* expr) {
+    ConstExprEvaluator evaluator(symTable_);
+    return evaluator.evaluate(expr);
+}
 
-    // Day 3: 进入函数体，处理局部作用域
-    symbolTable_.enterScope();
-    for (auto* param : func->params) {
-        if (symbolTable_.isDefinedInCurrentScope(param->name)) {
-            addError(param->line, param->column, SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                    "duplicate parameter '" + param->name + "'");
-            continue;
+std::string SemanticAnalyzer::errorMessage(SemanticErrorCode code) {
+    switch (code) {
+        case SemanticErrorCode::ERR_UNDECLARED_IDENT:
+            return "undeclared identifier";
+        case SemanticErrorCode::ERR_REDEFINED_SYMBOL:
+ return "redefined symbol";
+        case SemanticErrorCode::ERR_USE_BEFORE_DECL:
+            return "use before declaration";
+        case SemanticErrorCode::ERR_CONST_REASSIGN:
+            return "cannot reassign constant";
+        case SemanticErrorCode::ERR_CONST_INIT_UNDEFINED:
+            return "constant initializer undefined";
+        case SemanticErrorCode::ERR_CONST_EXPR_NON_CONST:
+            return "constant expression not compile-time evaluable";
+        case SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE:
+            return "invalid main function signature";
+        case SemanticErrorCode::ERR_MISSING_RETURN:
+            return "missing return statement";
+        case SemanticErrorCode::ERR_RETURN_TYPE_MISMATCH:
+            return "return type mismatch";
+        case SemanticErrorCode::ERR_VOID_FUNC_CALL_EXPR:
+            return "void function used as expression";
+        case SemanticErrorCode::ERR_WRONG_ARG_COUNT:
+            return "wrong number of arguments";
+        case SemanticErrorCode::ERR_BREAK_OUTSIDE_LOOP:
+            return "break outside loop";
+        case SemanticErrorCode::ERR_CONTINUE_OUTSIDE_LOOP:
+            return "continue outside loop";
+        case SemanticErrorCode::ERR_DIVIDE_BY_ZERO:
+            return "division by zero";
+    }
+    return "unknown semantic error";
+}
+
+// =====================================================================
+// Visitor implementations
+// =====================================================================
+
+void SemanticAnalyzer::visit(CompUnit* node) {
+    for (auto& elem : node->elements) {
+        if (elem) {
+            elem->accept(*this);
         }
-        auto paramSym = std::make_unique<Symbol>(
-            SymbolKind::PARAM, param->name, BasicType::INT, false, param->line);
-        symbolTable_.insert(std::move(paramSym));
     }
-    currentFunction_ = symbolTable_.lookup(func->name);
-    (func->body) {
-        visitBlock(func->body, retType == BasicType::INT);
-    }
-    currentFunction_ = nullptr;
-    symbolTable_.exitScope();
-}
-
-void SemanticAnalyzer::checkMainFunction() {
-    Symbol* mainSym = symbol_.lookup("main");
-    if (!mainSym) {
-        addError(1, 0, SemanticErrorCode::ERR_INVALIDMAIN_SIGN,
-                "main function not defined");
-        return;
-    }
-    if (!mainSym->isFunction()) {
-        addError(mainSym->line, 0, SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
-                "main must be a function");
-        return;
-    }
-    if (mainSym->getReturnType() != BasicType::INT) {
-        addError(mainSym->line, 0, SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
-                "main must return int");
-        return;
-    }
-    const auto& params = mainSym->getParams();
-    if (!params.empty()) {
-        addError(mainSym->line, 0, SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
-                "main must have no parameters (use 'void')");
+    if (!hasMain_) {
+        error(0, 0, SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
+              "program must contain int main(void) function");
     }
 }
 
-// =================== Day 3: 语句与表达式语义检查 ===================
-
-void SemanticAnalyzer::visitBlock(ast::Block* block, bool expectReturn) {
-    if (!block) return;
-    symbolTable_.enterScope();
-    for (auto* stmt : block->stmts) {
-        if (stmt) visitStmt(stmt, expectReturn);
+void SemanticAnalyzer::visit(VarDecl* node) {
+    if (node->isGlobal) {
+        // Global variable declaration
+        std::optional<int> constVal = std::nullopt;
+        if (node->initExpr) {
+            constVal = evaluateConstExpr(node->initExpr.get());
+        }
+        auto* sym = declareVar(node->name, SymbolKind::GLOBAL_VAR,
+                               node->line, true, constVal);
+        if (!sym) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+                  "redefinition of global variable '" + node->name + "'");
+        }
+    } else {
+        // Local variable declaration
+        std::optional<int> constVal = std::nullopt;
+        if (node->initExpr) {
+            constVal = evaluateConstExpr(node->initExpr.get());
+        }
+        auto* sym = declareVar(node->name, SymbolKind::LOCAL_VAR,
+                               node->line, false, constVal);
+        if (!sym) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+                  "redefinition of '" + node->name + "' in current scope");
+        }
+        if (node->initExpr) {
+            checkExpr(node->initExpr.get());
+        }
     }
-    symbolTable_.exitScope();
 }
 
-void SemanticAnalyzer::visitStmt(ast::Stmt* stmt, bool expectReturn) {
-    if (!stmt) return;
-
-    if (auto* varDecl = dynamic_cast<ast::VarDecl*>(stmt)) {
-        visitVarDecl(varDecl, false);
-        return;
-    }
-    if (auto* constDecl = dynamic_cast<ast::ConstDecl*>(stmt)) {
-        visitConstDecl(constDecl, false);
-        return;
-    }
-
-    if (auto* ret = dynamic_cast<ast::ReturnStmt*>(stmt)) {
-        if (!currentFunction_) return;
-        if (currentFunction_->getReturnType() == BasicType::VOID) {
-            if (ret->returnExpr) {
-                addError(ret->line, 0, SemanticErrorCode::ERR_RETURN_TYPE_MISMATCH,
-                        "void function should not return a value");
+void SemanticAnalyzer::visit(ConstDecl* node) {
+    if (node->isGlobal) {
+        // Global constant
+        std::optional<int> constVal = std::nullopt;
+        if (node->initExpr) {
+            constVal = evaluateConstExpr(node->initExpr.get());
+            if (!constVal.has_value()) {
+                error(node->line, node->column,
+                      SemanticErrorCode::ERR_CONST_INIT_UNDEFINED,
+                      "constant '" + node->name +
+                      "' initializer must be a compile-time constant expression");
+                return;
             }
         } else {
-            ifret->returnExpr) {
-                addError(ret->line, 0,ErrorCode::ERR_MISSING_RETURN,
-                        "non-void function must return a value");
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_CONST_INIT_UNDEFINED,
+                  "global constant '" + node->name +
+                  "' must have an initializer");
+            return;
+        }
+        auto* sym = declareVar(node->name, SymbolKind::GLOBAL_CONST,
+                               node->line, true, constVal);
+        if (!sym) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+                  "redefinition of global constant '" + node->name + "'");
+        }
+    } else {
+        // Local constant - still requires compile-time evaluation
+        bool constOk = true;
+        std::optional<int> constVal = std::nullopt;
+        if (node->initExpr) {
+            constVal = evaluateConstExpr(node->initExpr.get());
+            if (!constVal.has_value()) {
+               constOk = false;
+            }
+        }
+        if (!constOk) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_CONST_EXPR_NON_CONST,
+                  "local constant '" + node->name +
+                  "' requires compile-time constant initializer");
+        }
+        auto* sym = declareVar(node->name, SymbolKind::LOCAL_CONST,
+                               node->line, false, constVal);
+        if (!sym) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+                  "redefinition of '" + node->name + "' in current scope");
+        }
+        if (node->initExpr) {
+            checkExpr(node->initExpr.get());
+        }
+    }
+}
+
+void SemanticAnalyzer::visit(FuncDef* node) {
+    // Check main function signature
+    if (node->name == "main") {
+        if (!node->returnType || !node->returnType->isInt()) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
+                  "main function must return int");
+        } else if (!node->params.empty()) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
+                  "main function must have no parameters (int main(void))");
+        } else if (hasMain_) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+                  "more than one main function defined");
+        } else {
+            hasMain_ = true;
+        }
+    }
+
+    // Register function symbol in global scope
+    {
+        auto funcSym = std::make_unique<Symbol>(node->name, SymbolKind::FUNCTION,
+                                                 node->line, true);
+        funcSym->paramCount = static_cast<int>(node->params.size());
+        funcSym->returnsInt = node->returnType && node->returnType->isInt();
+
+        if (symTable_.lookupCurrentScope(node->name)) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+                  "redefinition of function '" + node->name + "'");
+            return;
+        }
+        symTable_.insert(std::move(funcSym));
+    }
+
+    // Enter function scope
+    symTable_.pushScope();
+
+    // Insert parameters into function scope
+    for (auto& param : node->params) {
+        if (param) {
+            if (symTable_.lookupCurrentScope(param->name)) {
+                error(param->line, param->column,
+                      SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+                      "redefinition of parameter '" + param->name + "'");
             } else {
-                visitExpr(ret->returnExpr);
+                auto pSym = std::make_unique<Symbol>(param->name,
+                                                      SymbolKind::PARAM,
+                                                      param->line, false);
+                symTable_.insert(std::move(pSym));
             }
         }
-        return;
     }
 
-    if (auto* assign = dynamic_cast<ast::Assignment*>(stmt)) {
-        if (auto* id = dynamic_cast<ast::Identifier*>(assign->lvalue)) {
-            Symbol* sym = symbolTable_.lookup(id->name);
-            if (sym && sym->isConst) {
-                addError(assign->line, assign->column, SemanticErrorCode::ERR_CONST_REASSIGN,
-                        "cannot assign to const '" + id->name + "'");
-            }
+    // Analyze function body
+    auto* savedFunc = currentFunction_;
+    currentFunction_ = node;
+
+    if (node->body) {
+        node->body->accept(*this);
+    }
+
+    // Check return paths for int-returning functions
+    if (node->returnType && node->returnType->isInt()) {
+        if (node->body && !checkReturnPaths(node->body.get(), true)) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_MISSING_RETURN,
+                  "function '" + node->name +
+                  "' is declared to return int but not all paths return a value");
         }
-        if (assign->rvalue) visitExpr(assign->rvalue);
-        return;
     }
 
-    if (auto* exprStmt dynamic_cast<ast::ExprStmt*>(stmt)) {
-        if (exprStmt->expr) visitExpr(exprStmt->expr);
-        return;
-    }
+    currentFunction_ = savedFunc;
+    symTable_.popScope();
+}
 
-    if (auto* ifStmt = dynamic_cast<ast::IfStmt*>(stmt)) {
-        if (ifStmt->condition) visitExpr(ifStmt->condition);
-        if (ifStmt->thenBranch) visitBlock(ifStmt->thenBranch, expectReturn);
-        ififStmt->elseBranch) visitBlock(ifStmt->elseBranch, expectReturn);
-        return;
-    }
+void SemanticAnalyzer::visit(Param* node) {
+    // Parameters are handled in visit(FuncDef*)
+    // Individual Param node visitation is not called separately
+}
 
-    if (auto* whileStmt = dynamic_cast<ast::WhileStmt*>(stmt)) {
-        if (whileStmt->condition) visitExpr(whileStmt->condition);
-        loopDepth_++;
-        if (whileStmtbody) visitBlock(Stmt->body);
-        loopDepth_--;
-        return;
-    }
-
-    if (dynamic_cast<ast::BreakStmt*>(stmt)) {
-        if (loop_ == 0) {
-            addError(stmt->line, 0, SemanticErrorCode::ERR_BREAK_OUTSIDE_LOOP,
-                    "break outside loop");
+void SemanticAnalyzer::visit(Block* node) {
+    symTable_.pushScope();
+    for (auto& stmt : node->statements) {
+        if (stmt) {
+            stmt->accept(*this);
         }
-        return;
     }
+    symTable_.popScope();
+}
 
-    if (dynamic_cast<ast::ContinueStmt*>(stmt)) {
-        if (loopDepth_ == 0) {
-            addError(stmt->line, 0, SemanticErrorCode::ERR_CONTINUE_OUTSIDE_LOOP,
-                    "continue outside loop");
-        }
-        return;
+void SemanticAnalyzer::visit(IfStmt* node) {
+    if (node->condition) {
+        checkExpr(node->condition.get());
+    }
+    if (node->thenBranch) {
+        node->thenBranch->accept(*this);
+    }
+    if (node->elseBranch) {
+        node->elseBranch->accept(*this);
     }
 }
 
-Symbol* SemanticAnalyzer::visitExpr(ast::Expr* expr) {
-    if (!expr) return nullptr;
-
-    if (dynamic_cast<ast::Number*>(expr)) {
-        return nullptr;
+void SemanticAnalyzer::visit(WhileStmt* node) {
+    if (node->condition) {
+        checkExpr(node->condition.get());
     }
-
-    if (auto* id = dynamic_cast<ast::Identifier*>(expr)) {
-        return visitID(id);
+    loopDepth_++;
+    if (node->body) {
+        node->body->accept(*this);
     }
-
-    if (auto* unary = dynamic_cast<ast::UnaryOp*>(expr)) {
-        visitExpr(unary->operand);
-        return nullptr;
-    }
-
-    if (auto* bin = dynamic<ast::BinaryOp*>(expr)) {
-        visitExpr(bin->left);
-        visitExpr(bin->right);
-        return nullptr;
-    }
-
-    if (auto* call = dynamic_cast<ast::FuncCall*>(expr)) {
-        Symbol* callee = symbolTable_.lookup(call->calleeName);
- if (!callee) {
-            addError(call->line, call->column, SemanticErrorCode::ERR_UNDECLARED_IDENT,
-                    "clared function '" + call->calleeName + "'");
-            return nullptr;
-        }
-        if (!callee->isFunction()) {
-            addError(call->line, call->column, SemanticErrorCode::ERR_UNDECLAREDENT,
-                    "'" + call->calleeName + "' is not a function");
-            return nullptr;
-        }
-        size_t expected = callee->getParams().size();
-        size_t actual = call->arguments.size();
-        ifexpected != actual) {
-            addError(call->line, call->column, SemanticErrorCode::ERR_WRONG_ARG_COUNT,
-                    "function '" + call->calleeName + "' expects " +
-                    std::_string(expected) + " arguments but " +
-                    std::to_string(actual) + " given");
-        }
-        for (auto* arg : call->arguments) {
-            visitExpr(arg);
-        }
-        if (callee->getReturnType() == BasicType::VOID && !call->isStatement) {
-            addError(call->line, call->column, SemanticErrorCode::ERR_VOID_FUNC_CALL_EXPR,
-                    "void function '" + call->calleeName + "' used in expression");
-        }
-        return nullptr;
-    }
-
-    nullptr;
+    loopDepth_--;
 }
 
-Symbol* SemanticAnalyzer::visitID(ast::Identifier* id) {
-    Symbol* sym = symbolTable_.lookup(id->name);
+void SemanticAnalyzer::visit(BreakStmt* node) {
+    if (loopDepth_ == 0) {
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_BREAK_OUTSIDE_LOOP,
+              "'break' statement not within a loop");
+    }
+}
+
+void SemanticAnalyzer::visit(ContinueStmt* node) {
+    if (loopDepth_ == 0) {
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_CONTINUE_OUTSIDE_LOOP,
+              "'continue' statement not within a loop");
+    }
+}
+
+void SemanticAnalyzer::visit(ReturnStmt* node) {
+    if (currentFunction_) {
+        bool funcReturnsInt = currentFunction_->returnType &&
+                              currentFunction_->returnType->isInt();
+        bool funcReturnsVoid = currentFunction_->returnType &&
+                               currentFunction_->returnType->isVoid();
+
+        if (funcReturnsInt && !node->value) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_RETURN_TYPE_MISMATCH,
+                  "function '" + currentFunction_->name +
+                  "' expects a return value of type int");
+        }
+        if (funcReturnsVoid && node->value) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_RETURN_TYPE_MISMATCH,
+                  "void function '" + currentFunction_->name +
+                  "' should not return a value");
+        }
+    }
+    if (node->value) {
+        checkExpr(node->value.get());
+    }
+}
+
+void SemanticAnalyzer::visit(ExprStmt* node) {
+    if (node->expression) {
+        checkExpr(node->expression.get());
+    }
+}
+
+void SemanticAnalyzer::visit(AssignStmt* node) {
+    Symbol* sym = lookupSymbol(node->name);
     if (!sym) {
-        addError(id->line, id->column, SemanticErrorCode::ERR_UNDECLARED_IDENT,
-                "use of undeclared identifier '" + id->name + "'");
-        return nullptr;
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_UNDECLARED_IDENT,
+              "use of undeclared identifier '" + node->name + "'");
+        return;
     }
-    (sym->kind == SymbolKind::FUNCTION) {
-        addError(id->line, id->column,ErrorCode::ERR_UNDECLARED_IDENT,
-                "cannot use function '" + id->name + "' as a variable");
-        return nullptr;
-       return sym;
+    if (sym->isConst) {
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_CONST_REASSIGN,
+              "cannot assign to const variable '" + node->name + "'");
+    }
+    if (sym->kind == SymbolKind::FUNCTION) {
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_VOID_FUNC_CALL_EXPR,
+              "cannot assign to function '" + node->name + "'");
+    }
+    if (node->value) {
+        checkExpr(node->value.get());
+    }
+    sym->isUsed = true;
 }
 
-} // namespace semantic
+void SemanticAnalyzer::visit(EmptyStmt* node) {
+    // Nothing to check
+}
+
+void SemanticAnalyzer::visit(BinaryExpr* node) {
+    if (node->left) {
+        checkExpr(node->left.get());
+    }
+    if (node->right) {
+        checkExpr(node->right.get());
+    }
+    // Check for division by zero in constant expressions
+    if ((node->op == BinaryExpr::Op::DIV ||
+         node->op == BinaryExpr::Op::MOD) && node->right) {
+        auto rightVal = evaluateConstExpr(node->right.get());
+        if (rightVal.has_value() && rightVal.value() == 0) {
+            error(node->line, node->column,
+                  SemanticErrorCode::ERR_DIVIDE_BY_ZERO,
+                  "division by zero");
+        }
+    }
+}
+
+void SemanticAnalyzer::visit(UnaryExpr* node) {
+    if (node->operand) {
+        checkExpr(node->operand.get());
+    }
+}
+
+void SemanticAnalyzer::visit(Identifier* node) {
+    Symbol* sym = lookupSymbol(node->name);
+    if (!sym) {
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_UNDECLARED_IDENT,
+              "use of undeclared identifier '" + node->name + "'");
+        return;
+    }
+    sym->isUsed = true;
+    // Check use-before-declaration for local symbols
+    if (!sym->isGlobal && sym->line > node->line) {
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_USE_BEFORE_DECL,
+             "use of '" + node->name + "' before its declaration");
+    }
+}
+
+void SemanticAnalyzer::visit(Number* node) {
+    // Numeric literals are always valid
+}
+
+void SemanticAnalyzer::visit(FuncCall* node) {
+    Symbol* sym = lookupSymbol(node->name);
+    if (!sym) {
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_UNDECLARED_IDENT,
+              "use of undeclared function '" + node->name + "'");
+        return;
+    }
+    if (sym->kind != SymbolKind::FUNCTION) {
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_UNDECLARED_IDENT,
+              "'" + node->name + "' is not a function");
+        return;
+    }
+
+    // Check argument count
+    int expectedArgs = sym->paramCount;
+    int actualArgs = static_cast<int>(node->arguments.size());
+    if (expectedArgs != actualArgs) {
+        error(node->line, node->column,
+              SemanticErrorCode::ERR_WRONG_ARG_COUNT,
+              "function '" + node->name + "' expects " +
+              std::to_string(expectedArgs) + " arguments, but " +
+              std::to_string(actualArgs) + " were provided");
+    }
+
+    // Check all argument expressions
+    for (auto& arg : node->arguments) {
+        if (arg) {
+            checkExpr(arg.get());
+        }
+    }
+
+    sym->isUsed = true;
+}
+
+// =====================================================================
+// Return path analysis
+// =====================================================================
+
+bool SemanticAnalyzer::checkReturnPaths(Block* block, bool expectReturn) {
+    if (!expectReturn) return true;
+    bool hasReturn = false;
+
+    for (auto& stmt : block->statements) {
+        if (!stmt) continue;
+
+        // A direct return statement guarantees return on this path
+ if (dynamic_cast<ReturnStmt*>(stmt.get())) {
+            hasReturn = true;
+            continue;
+        }
+
+        // For if-statements, both branches must return
+        if (auto* ifStmt = dynamic_cast<IfStmt*>(stmt.get())) {
+            bool thenHasReturn = false;
+            bool elseHasReturn = false;
+
+            if (ifStmt->thenBranch) {
+                if (auto* thenBlock =
+                        dynamic_cast<Block*>(ifStmt->thenBranch.get())) {
+                    thenHasReturn = checkReturnPaths(thenBlock, true);
+                } else if (dynamic_cast<ReturnStmt*>(
+                               ifStmt->thenBranch.get())) {
+                    thenHasReturn = true;
+                }
+            }
+
+            if (ifStmt->elseBranch) {
+                if (auto* elseBlock =
+                        dynamic_cast<Block*>(ifStmt->elseBranch.get())) {
+                    elseHasReturn = checkReturnPaths(elseBlock, true);
+                } else if (dynamic_cast<ReturnStmt*>(
+                               ifStmt->elseBranch.get())) {
+                    elseHasReturn = true;
+                }
+            } else {
+                // No else branch: there is a path without return
+                elseHasReturn = false;
+            }
+
+            if (thenHasReturn && elseHasReturn) {
+                hasReturn = true;
+            }
+        }
+
+        // While-loops may not execute, so they do not count as a definite
+        // return
+    }
+
+    return hasReturn;
+}
+
+} // namespace toyc

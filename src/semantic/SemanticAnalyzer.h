@@ -1,48 +1,68 @@
-#pragma once
+#ifndef TOYC_SEMANTIC_ANALYZER_H
+#define TOYC_SEMANTIC_ANALYZER_H
 
-#include "SymbolTable.h"
-#include "Symbol.h"
-#include "ConstExprEvaluator.h"
-#include "AST.h"
+#include "ast/AST.h"
+#include "semantic/errors.h"
+#include "semantic/Symbol.h"
+#include "semantic/SymbolTable.h"
 #include <optional>
+#include <string>
 #include <vector>
 
-namespace semantic {
+namespace toyc {
 
-class SemanticAnalyzer {
+class SemanticAnalyzer : public ASTVisitor {
 public:
-    explicit SemanticAnalyzer();
-    ~SemanticAnalyzer();
+    SemanticAnalyzer();
 
-    bool analyze(ast::ASTNode* root);
-    const std::vector<SemanticError>& errors() const { return errors_; }
-    bool hasErrors() const { return !errors_.empty(); }
+    bool analyze(CompUnit* root);
+    bool hasErrors() const;
+    const std::vector<SemanticError>& errors() const;
 
-    Symbol* lookupGlobal(const std::string& name);
-    Symbol* lookupLocal(const std::string& name);
-    bool getConstantValue(const std::string& name, int* out_value);
+    Symbol* lookupGlobal(const std::string& name) const;
+    Symbol* lookupLocal(const std::string& name) const;
+    bool getConstantValue(const std::string& name, int* outValue) const;
 
-    void reset();
-    void addError(int line, int column, SemanticErrorCode code, const std::string& msg);
+    void visit(CompUnit* node) override;
+    void visit(VarDecl* node) override;
+    void visit(ConstDecl* node) override;
+    void visit(FuncDef* node) override;
+    void visit(Param* node) override;
+    void visit(Block* node) override;
+    void visit(IfStmt* node) override;
+    void visit(WhileStmt* node) override;
+    void visit(BreakStmt* node) override;
+    void visit(ContinueStmt* node) override;
+    void visit(ReturnStmt* node) override;
+    void visit(ExprStmt* node) override;
+    void visit(AssignStmt* node) override;
+    void visit(EmptyStmt* node) override;
+    void visit(BinaryExpr* node) override;
+    void visit(UnaryExpr* node) override;
+    void visit(Identifier* node) override;
+    void visit(Number* node) override;
+    void visit(FuncCall* node) override;
 
 private:
-    SymbolTable symbolTable_;
+    SymbolTable symTable_;
     std::vector<SemanticError> errors_;
-    ConstExprEvaluator constExprEval_;
+    FuncDef* currentFunction_ = nullptr;
     int loopDepth_ = 0;
-    Symbol* currentFunction_ = nullptr;
-    bool hasReturnInPath_ = false;
+    bool hasMain_ = false;
+    bool inConstantContext_ = false;
 
-    void visitCompUnit(ast::CompUnit* node);
-    void visitFuncDef(ast::FuncDef* func);
-    void visitVarDecl(ast::VarDecl* decl, bool isGlobal);
-    void visitConstDecl(ast::ConstDecl* decl, bool isGlobal);
-    void checkMainFunction();
-    void visitBlock(ast::Block* block, bool expectReturn = false);
-    void visitStmt(ast::Stmt* stmt, bool expectReturn = false);
-    Symbol* visitExpr(ast::Expr* expr);
-    Symbol* visitID(ast::Identifier* id);
-    bool hasReturnOnAllPaths(ast::Block* block);
+    void error(int line, int col, SemanticErrorCode code,
+               const std::string& msg);
+    Symbol* declareVar(const std::string& name, SymbolKind kind,
+                       int line, bool isGlobal,
+                       std::optional<int> constVal = std::nullopt);
+    Symbol* lookupSymbol(const std::string& name);
+    void checkExpr(Expr* expr);
+    std::optional<int> evaluateConstExpr(Expr* expr);
+    bool checkReturnPaths(Block* block, bool expectReturn);
+    std::string errorMessage(SemanticErrorCode code);
 };
 
-} // namespace semantic
+} // namespace toyc
+
+#endif

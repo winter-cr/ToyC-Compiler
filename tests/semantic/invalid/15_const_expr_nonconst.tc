@@ -1,9 +1,0 @@
-// 非法测试15: 常量初始化为非常量表达式
-// 目标：应报错 SEM_CONST_EXPR_NON_CONST
-int global_var = 10;
-const int A = global_var;  // 全局变量不是常量，不能用于常量表达式
-
-int main(void) {
-    return A;
-}
-

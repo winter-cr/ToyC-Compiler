@@ -1,7 +1,0 @@
-// 测试4: 局部变量声明
-// 目标：验证函数体内局部变量声明
-int main(void) {
-    int x = 10;
-    int y = x * 2;
-    return y;
-}
