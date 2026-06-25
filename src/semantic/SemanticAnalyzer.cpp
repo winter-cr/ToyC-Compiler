@@ -15,7 +15,7 @@ bool SemanticAnalyzer::analyze(CompUnit* root) {
     loopDepth_ = 0;
     currentFunction_ = nullptr;
     root->accept(*this);
- return !hasErrors();
+    return !hasErrors();
 }
 
 bool SemanticAnalyzer::hasErrors() const {
@@ -63,7 +63,7 @@ Symbol* SemanticAnalyzer::declareVar(const std::string& name, SymbolKind kind,
     if (!symTable_.insert(std::move(sym))) {
         Symbol* existing = symTable_.lookupCurrentScope(name);
         if (existing) {
-            return nullptr; // redefinition
+            return nullptr;
         }
     }
     return raw;
@@ -73,7 +73,7 @@ Symbol* SemanticAnalyzer::lookupSymbol(const std::string& name) {
     return symTable_.lookup(name);
 }
 
-void SemanticAnalyzer::checkExpr(Expr* expr) {
+void SemanticAnalyzer::checkExpr(const Expr* expr) {
     if (expr) {
         expr->accept(*this);
     }
@@ -89,7 +89,7 @@ std::string SemanticAnalyzer::errorMessage(SemanticErrorCode code) {
         case SemanticErrorCode::ERR_UNDECLARED_IDENT:
             return "undeclared identifier";
         case SemanticErrorCode::ERR_REDEFINED_SYMBOL:
- return "redefined symbol";
+            return "redefined symbol";
         case SemanticErrorCode::ERR_USE_BEFORE_DECL:
             return "use before declaration";
         case SemanticErrorCode::ERR_CONST_REASSIGN:
@@ -119,14 +119,14 @@ std::string SemanticAnalyzer::errorMessage(SemanticErrorCode code) {
 }
 
 // =====================================================================
-// Visitor implementations
+// Visitor implementations — all take const& per ASTVisitor interface
 // =====================================================================
 
-void SemanticAnalyzer::visit(CompUnit* node) {
-    for (auto& elem : node->elements) {
-        if (elem) {
-            elem->accept(*this);
-        }
+void SemanticAnalyzer::visit(const CompUnit& node) {
+    for (auto& elem : node.elements) {
+        std::visit([this](auto& ptr) {
+            if (ptr) ptr->accept(*this);
+        }, elem);
     }
     if (!hasMain_) {
         error(0, 0, SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
@@ -134,180 +134,161 @@ void SemanticAnalyzer::visit(CompUnit* node) {
     }
 }
 
-void SemanticAnalyzer::visit(VarDecl* node) {
-    if (node->isGlobal) {
-        // Global variable declaration
+void SemanticAnalyzer::visit(const VarDecl& node) {
+    if (node.isGlobal) {
         std::optional<int> constVal = std::nullopt;
-        if (node->initExpr) {
-            constVal = evaluateConstExpr(node->initExpr.get());
+        if (node.initExpr) {
+            constVal = evaluateConstExpr(node.initExpr.get());
         }
-        auto* sym = declareVar(node->name, SymbolKind::GLOBAL_VAR,
-                               node->line, true, constVal);
+        auto* sym = declareVar(node.name, SymbolKind::GLOBAL_VAR,
+                               node.line, true, constVal);
         if (!sym) {
-            error(node->line, node->column,
+            error(node.line, node.column,
                   SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                  "redefinition of global variable '" + node->name + "'");
+                  "redefinition of global variable '" + node.name + "'");
         }
     } else {
-        // Local variable declaration
         std::optional<int> constVal = std::nullopt;
-        if (node->initExpr) {
-            constVal = evaluateConstExpr(node->initExpr.get());
+        if (node.initExpr) {
+            constVal = evaluateConstExpr(node.initExpr.get());
         }
-        auto* sym = declareVar(node->name, SymbolKind::LOCAL_VAR,
-                               node->line, false, constVal);
+        auto* sym = declareVar(node.name, SymbolKind::LOCAL_VAR,
+                               node.line, false, constVal);
         if (!sym) {
-            error(node->line, node->column,
+            error(node.line, node.column,
                   SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                  "redefinition of '" + node->name + "' in current scope");
+                  "redefinition of '" + node.name + "' in current scope");
         }
-        if (node->initExpr) {
-            checkExpr(node->initExpr.get());
+        if (node.initExpr) {
+            checkExpr(node.initExpr.get());
         }
     }
 }
 
-void SemanticAnalyzer::visit(ConstDecl* node) {
-    if (node->isGlobal) {
-        // Global constant
+void SemanticAnalyzer::visit(const ConstDecl& node) {
+    if (node.isGlobal) {
         std::optional<int> constVal = std::nullopt;
-        if (node->initExpr) {
-            constVal = evaluateConstExpr(node->initExpr.get());
+        if (node.initExpr) {
+            constVal = evaluateConstExpr(node.initExpr.get());
             if (!constVal.has_value()) {
-                error(node->line, node->column,
+                error(node.line, node.column,
                       SemanticErrorCode::ERR_CONST_INIT_UNDEFINED,
-                      "constant '" + node->name +
+                      "constant '" + node.name +
                       "' initializer must be a compile-time constant expression");
                 return;
             }
         } else {
-            error(node->line, node->column,
+            error(node.line, node.column,
                   SemanticErrorCode::ERR_CONST_INIT_UNDEFINED,
-                  "global constant '" + node->name +
+                  "global constant '" + node.name +
                   "' must have an initializer");
             return;
         }
-        auto* sym = declareVar(node->name, SymbolKind::GLOBAL_CONST,
-                               node->line, true, constVal);
+        auto* sym = declareVar(node.name, SymbolKind::GLOBAL_CONST,
+                               node.line, true, constVal);
         if (!sym) {
-            error(node->line, node->column,
+            error(node.line, node.column,
                   SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                  "redefinition of global constant '" + node->name + "'");
+                  "redefinition of global constant '" + node.name + "'");
         }
     } else {
-        // Local constant - still requires compile-time evaluation
         bool constOk = true;
         std::optional<int> constVal = std::nullopt;
-        if (node->initExpr) {
-            constVal = evaluateConstExpr(node->initExpr.get());
+        if (node.initExpr) {
+            constVal = evaluateConstExpr(node.initExpr.get());
             if (!constVal.has_value()) {
-               constOk = false;
+                constOk = false;
             }
         }
         if (!constOk) {
-            error(node->line, node->column,
+            error(node.line, node.column,
                   SemanticErrorCode::ERR_CONST_EXPR_NON_CONST,
-                  "local constant '" + node->name +
-                  "' requires compile-time constant initializer");
-        }
-        auto* sym = declareVar(node->name, SymbolKind::LOCAL_CONST,
-                               node->line, false, constVal);
-        if (!sym) {
-            error(node->line, node->column,
-                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                  "redefinition of '" + node->name + "' in current scope");
-        }
-        if (node->initExpr) {
-            checkExpr(node->initExpr.get());
-        }
-    }
-}
-
-void SemanticAnalyzer::visit(FuncDef* node) {
-    // Check main function signature
-    if (node->name == "main") {
-        if (!node->returnType || !node->returnType->is_int()) {
-            error(node->line, node->column,
-                  SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
-                  "main function must return int");
-        } else if (!node->params.empty()) {
-            error(node->line, node->column,
-                  SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
-                  "main function must have no parameters (int main(void))");
-        } else if (hasMain_) {
-            error(node->line, node->column,
-                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                  "more than one main function defined");
-        } else {
-            hasMain_ = true;
-        }
-    }
-
-    // Register function symbol in global scope
-    {
-        auto funcSym = std::make_unique<Symbol>(node->name, SymbolKind::FUNCTION,
-                                                 node->line, true);
-        funcSym->paramCount = static_cast<int>(node->params.size());
-        funcSym->returnsInt = node->returnType && node->returnType->is_int();
-
-        if (symTable_.lookupCurrentScope(node->name)) {
-            error(node->line, node->column,
-                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                  "redefinition of function '" + node->name + "'");
+                  "constant '" + node.name +
+                  "' initializer must be a compile-time constant expression");
             return;
         }
-        symTable_.insert(std::move(funcSym));
+        auto* sym = declareVar(node.name, SymbolKind::LOCAL_CONST,
+                               node.line, false, constVal);
+        if (!sym) {
+            error(node.line, node.column,
+                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+                  "redefinition of '" + node.name + "' in current scope");
+        }
+        if (node.initExpr) {
+            checkExpr(node.initExpr.get());
+        }
+    }
+}
+
+void SemanticAnalyzer::visit(const FuncDef& node) {
+    if (node.name == "main") {
+        if (!node.returnType || !node.returnType->is_int()) {
+            error(node.line, node.column,
+                  SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
+                  "main function must return int");
+        }
+        if (!node.params.empty()) {
+            error(node.line, node.column,
+                  SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
+                  "main function must have no parameters");
+        }
+        hasMain_ = true;
     }
 
-    // Enter function scope
+    Symbol* existing = symTable_.lookupCurrentScope(node.name);
+    if (existing) {
+        error(node.line, node.column,
+              SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+              "redefinition of function '" + node.name + "'");
+        return;
+    }
+
+    auto funcSym = std::make_unique<Symbol>(node.name, SymbolKind::FUNCTION,
+                                             node.line, true);
+    funcSym->returnsInt = node.returnType && node.returnType->is_int();
+    funcSym->paramCount = static_cast<int>(node.params.size());
+    symTable_.insert(std::move(funcSym));
+
+    currentFunction_ = const_cast<FuncDef*>(&node);
+
     symTable_.pushScope();
 
-    // Insert parameters into function scope
-    for (auto& param : node->params) {
-        if (param) {
-            if (symTable_.lookupCurrentScope(param->name)) {
-                error(param->line, param->column,
-                      SemanticErrorCode::ERR_REDEFINED_SYMBOL,
-                      "redefinition of parameter '" + param->name + "'");
-            } else {
-                auto pSym = std::make_unique<Symbol>(param->name,
-                                                      SymbolKind::PARAM,
-                                                      param->line, false);
-                symTable_.insert(std::move(pSym));
-            }
+    for (auto& param : node.params) {
+        if (symTable_.lookupCurrentScope(param->name)) {
+            error(param->line, param->column,
+                  SemanticErrorCode::ERR_REDEFINED_SYMBOL,
+                  "redefinition of parameter '" + param->name + "'");
+        } else {
+            auto pSym = std::make_unique<Symbol>(param->name, SymbolKind::PARAM,
+                                                  param->line, false);
+            symTable_.insert(std::move(pSym));
         }
     }
 
-    // Analyze function body
-    auto* savedFunc = currentFunction_;
-    currentFunction_ = node;
-
-    if (node->body) {
-        node->body->accept(*this);
+    if (node.body) {
+        node.body->accept(*this);
     }
 
-    // Check return paths for int-returning functions
-    if (node->returnType && node->returnType->is_int()) {
-        if (node->body && !checkReturnPaths(node->body.get(), true)) {
-            error(node->line, node->column,
+    if (node.returnType && node.returnType->is_int()) {
+        if (!checkReturnPaths(node.body.get(), true)) {
+            error(node.line, node.column,
                   SemanticErrorCode::ERR_MISSING_RETURN,
-                  "function '" + node->name +
-                  "' is declared to return int but not all paths return a value");
+                  "function '" + node.name +
+                  "' may not return a value on every path");
         }
     }
 
-    currentFunction_ = savedFunc;
     symTable_.popScope();
+    currentFunction_ = nullptr;
 }
 
-void SemanticAnalyzer::visit(Param* node) {
-    // Parameters are handled in visit(FuncDef*)
-    // Individual Param node visitation is not called separately
+void SemanticAnalyzer::visit(const Param& /*node*/) {
+    // Parameters handled in FuncDef visitor
 }
 
-void SemanticAnalyzer::visit(Block* node) {
+void SemanticAnalyzer::visit(const Block& node) {
     symTable_.pushScope();
-    for (auto& stmt : node->statements) {
+    for (auto& stmt : node.statements) {
         if (stmt) {
             stmt->accept(*this);
         }
@@ -315,228 +296,189 @@ void SemanticAnalyzer::visit(Block* node) {
     symTable_.popScope();
 }
 
-void SemanticAnalyzer::visit(IfStmt* node) {
-    if (node->cond) {
-        checkExpr(node->cond.get());
+void SemanticAnalyzer::visit(const IfStmt& node) {
+    if (node.cond) {
+        checkExpr(node.cond.get());
     }
-    if (node->then) {
-        node->then->accept(*this);
+    if (node.then) {
+        node.then->accept(*this);
     }
-    if (node->else_) {
-        node->else_->accept(*this);
+    if (node.else_) {
+        node.else_->accept(*this);
     }
 }
 
-void SemanticAnalyzer::visit(WhileStmt* node) {
-    if (node->cond) {
-        checkExpr(node->cond.get());
+void SemanticAnalyzer::visit(const WhileStmt& node) {
+    if (node.cond) {
+        checkExpr(node.cond.get());
     }
     loopDepth_++;
-    if (node->body) {
-        node->body->accept(*this);
+    if (node.body) {
+        node.body->accept(*this);
     }
     loopDepth_--;
 }
 
-void SemanticAnalyzer::visit(BreakStmt* node) {
+void SemanticAnalyzer::visit(const BreakStmt& node) {
     if (loopDepth_ == 0) {
-        error(node->line, node->column,
+        error(node.line, node.column,
               SemanticErrorCode::ERR_BREAK_OUTSIDE_LOOP,
-              "'break' statement not within a loop");
+              "break statement outside of loop");
     }
 }
 
-void SemanticAnalyzer::visit(ContinueStmt* node) {
+void SemanticAnalyzer::visit(const ContinueStmt& node) {
     if (loopDepth_ == 0) {
-        error(node->line, node->column,
+        error(node.line, node.column,
               SemanticErrorCode::ERR_CONTINUE_OUTSIDE_LOOP,
-              "'continue' statement not within a loop");
+              "continue statement outside of loop");
     }
 }
 
-void SemanticAnalyzer::visit(ReturnStmt* node) {
-    if (currentFunction_) {
-        bool funcReturnsInt = currentFunction_->returnType &&
-                              currentFunction_->returnType->is_int();
-        bool funcReturnsVoid = currentFunction_->returnType &&
-                               currentFunction_->returnType->is_void();
+void SemanticAnalyzer::visit(const ReturnStmt& node) {
+    if (!currentFunction_) return;
 
-        if (funcReturnsInt && !node->value) {
-            error(node->line, node->column,
+    if (node.value) {
+        if (currentFunction_->returnType->is_void()) {
+            error(node.line, node.column,
                   SemanticErrorCode::ERR_RETURN_TYPE_MISMATCH,
-                  "function '" + currentFunction_->name +
-                  "' expects a return value of type int");
+                  "void function should not return a value");
         }
-        if (funcReturnsVoid && node->value) {
-            error(node->line, node->column,
+        checkExpr(node.value.get());
+    } else {
+        if (currentFunction_->returnType->is_int()) {
+            error(node.line, node.column,
                   SemanticErrorCode::ERR_RETURN_TYPE_MISMATCH,
-                  "void function '" + currentFunction_->name +
-                  "' should not return a value");
+                  "non-void function must return a value");
         }
     }
-    if (node->value) {
-        checkExpr(node->value.get());
+}
+
+void SemanticAnalyzer::visit(const ExprStmt& node) {
+    if (node.expr) {
+        checkExpr(node.expr.get());
     }
 }
 
-void SemanticAnalyzer::visit(ExprStmt* node) {
-    if (node->expression) {
-        checkExpr(node->expression.get());
+void SemanticAnalyzer::visit(const AssignStmt& node) {
+    if (node.lvalue) {
+        Symbol* sym = lookupSymbol(node.lvalue->name);
+        if (sym) {
+            if (sym->isConst) {
+                error(node.line, node.column,
+                      SemanticErrorCode::ERR_CONST_REASSIGN,
+                      "cannot reassign constant '" + node.lvalue->name + "'");
+            }
+            sym->isUsed = true;
+        }
+    }
+    if (node.value) {
+        checkExpr(node.value.get());
     }
 }
 
-void SemanticAnalyzer::visit(AssignStmt* node) {
-    Symbol* sym = lookupSymbol(node->name);
-    if (!sym) {
-        error(node->line, node->column,
-              SemanticErrorCode::ERR_UNDECLARED_IDENT,
-              "use of undeclared identifier '" + node->name + "'");
-        return;
+void SemanticAnalyzer::visit(const BinaryExpr& node) {
+    if (node.left) {
+        node.left->accept(*this);
     }
-    if (sym->isConst) {
-        error(node->line, node->column,
-              SemanticErrorCode::ERR_CONST_REASSIGN,
-              "cannot assign to const variable '" + node->name + "'");
+    if (node.right) {
+        node.right->accept(*this);
     }
-    if (sym->kind == SymbolKind::FUNCTION) {
-        error(node->line, node->column,
-              SemanticErrorCode::ERR_VOID_FUNC_CALL_EXPR,
-              "cannot assign to function '" + node->name + "'");
-    }
-    if (node->value) {
-        checkExpr(node->value.get());
-    }
-    sym->isUsed = true;
-}
-
-void SemanticAnalyzer::visit(EmptyStmt* node) {
-    // Nothing to check
-}
-
-void SemanticAnalyzer::visit(BinaryExpr* node) {
-    if (node->left) {
-        checkExpr(node->left.get());
-    }
-    if (node->right) {
-        checkExpr(node->right.get());
-    }
-    // Check for division by zero in constant expressions
-    if ((node->op == BinaryOp::Div ||
-         node->op == BinaryOp::Mod) && node->right) {
-        auto rightVal = evaluateConstExpr(node->right.get());
+    if ((node.op == BinaryOp::Div ||
+         node.op == BinaryOp::Mod) && node.right) {
+        auto rightVal = evaluateConstExpr(node.right.get());
         if (rightVal.has_value() && rightVal.value() == 0) {
-            error(node->line, node->column,
+            error(node.line, node.column,
                   SemanticErrorCode::ERR_DIVIDE_BY_ZERO,
                   "division by zero");
         }
     }
 }
 
-void SemanticAnalyzer::visit(UnaryExpr* node) {
-    if (node->operand) {
-        checkExpr(node->operand.get());
+void SemanticAnalyzer::visit(const UnaryExpr& node) {
+    if (node.operand) {
+        node.operand->accept(*this);
     }
 }
 
-void SemanticAnalyzer::visit(Identifier* node) {
-    Symbol* sym = lookupSymbol(node->name);
+void SemanticAnalyzer::visit(const Identifier& node) {
+    Symbol* sym = lookupSymbol(node.name);
     if (!sym) {
-        error(node->line, node->column,
+        error(node.line, node.column,
               SemanticErrorCode::ERR_UNDECLARED_IDENT,
-              "use of undeclared identifier '" + node->name + "'");
-        return;
-    }
-    sym->isUsed = true;
-    // Check use-before-declaration for local symbols
-    if (!sym->isGlobal && sym->line > node->line) {
-        error(node->line, node->column,
-              SemanticErrorCode::ERR_USE_BEFORE_DECL,
-             "use of '" + node->name + "' before its declaration");
+              "undeclared identifier '" + node.name + "'");
+    } else {
+        sym->isUsed = true;
     }
 }
 
-void SemanticAnalyzer::visit(Number* node) {
-    // Numeric literals are always valid
+void SemanticAnalyzer::visit(const Number& /*node*/) {
+    // Literals are always valid
 }
 
-void SemanticAnalyzer::visit(FuncCall* node) {
-    Symbol* sym = lookupSymbol(node->name);
-    if (!sym) {
-        error(node->line, node->column,
+void SemanticAnalyzer::visit(const FuncCall& node) {
+    Symbol* funcSym = symTable_.lookupGlobal(node.name);
+    if (!funcSym || funcSym->kind != SymbolKind::FUNCTION) {
+        error(node.line, node.column,
               SemanticErrorCode::ERR_UNDECLARED_IDENT,
-              "use of undeclared function '" + node->name + "'");
+              "undefined function '" + node.name + "'");
         return;
     }
-    if (sym->kind != SymbolKind::FUNCTION) {
-        error(node->line, node->column,
-              SemanticErrorCode::ERR_UNDECLARED_IDENT,
-              "'" + node->name + "' is not a function");
-        return;
-    }
-
-    // Check argument count
-    int expectedArgs = sym->paramCount;
-    int actualArgs = static_cast<int>(node->args.size());
-    if (expectedArgs != actualArgs) {
-        error(node->line, node->column,
+    int actualArgs = static_cast<int>(node.args.size());
+    if (actualArgs != funcSym->paramCount) {
+        error(node.line, node.column,
               SemanticErrorCode::ERR_WRONG_ARG_COUNT,
-              "function '" + node->name + "' expects " +
-              std::to_string(expectedArgs) + " arguments, but " +
-              std::to_string(actualArgs) + " were provided");
+              "function '" + node.name + "' expects " +
+              std::to_string(funcSym->paramCount) + " arguments, got " +
+              std::to_string(actualArgs));
     }
-
-    // Check all argument expressions
-    for (auto& arg : node->args) {
+    for (auto& arg : node.args) {
         if (arg) {
-            checkExpr(arg.get());
+            arg->accept(*this);
         }
     }
-
-    sym->isUsed = true;
+    if (!funcSym->returnsInt) {
+        if (!currentFunction_ || currentFunction_->returnType->is_int()) {
+            error(node.line, node.column,
+                  SemanticErrorCode::ERR_VOID_FUNC_CALL_EXPR,
+                  "void function '" + node.name +
+                  "' used in expression context");
+        }
+    }
 }
 
-// =====================================================================
-// Return path analysis
-// =====================================================================
+bool SemanticAnalyzer::checkReturnPaths(const Block* block, bool expectReturn) {
+    if (!block) return !expectReturn;
 
-bool SemanticAnalyzer::checkReturnPaths(Block* block, bool expectReturn) {
-    if (!expectReturn) return true;
     bool hasReturn = false;
-
     for (auto& stmt : block->statements) {
         if (!stmt) continue;
 
-        // A direct return statement guarantees return on this path
- if (dynamic_cast<ReturnStmt*>(stmt.get())) {
-            hasReturn = true;
-            continue;
-        }
-
-        // For if-statements, both branches must return
-        if (auto* ifStmt = dynamic_cast<IfStmt*>(stmt.get())) {
+        if (auto* ret = dynamic_cast<const ReturnStmt*>(stmt.get())) {
+            if (expectReturn && ret->value) {
+                hasReturn = true;
+            } else if (!expectReturn && !ret->value) {
+                hasReturn = true;
+            }
+        } else if (auto* ifStmt = dynamic_cast<const IfStmt*>(stmt.get())) {
             bool thenHasReturn = false;
             bool elseHasReturn = false;
 
             if (ifStmt->then) {
-                if (auto* thenBlock =
-                        dynamic_cast<Block*>(ifStmt->then.get())) {
-                    thenHasReturn = checkReturnPaths(thenBlock, true);
-                } else if (dynamic_cast<ReturnStmt*>(
-                               ifStmt->then.get())) {
+                if (auto* thenBlock = dynamic_cast<const Block*>(ifStmt->then.get())) {
+                    thenHasReturn = checkReturnPaths(thenBlock, expectReturn);
+                } else if (dynamic_cast<const ReturnStmt*>(ifStmt->then.get())) {
                     thenHasReturn = true;
                 }
             }
 
             if (ifStmt->else_) {
-                if (auto* elseBlock =
-                        dynamic_cast<Block*>(ifStmt->else_.get())) {
-                    elseHasReturn = checkReturnPaths(elseBlock, true);
-                } else if (dynamic_cast<ReturnStmt*>(
-                               ifStmt->else_.get())) {
+                if (auto* elseBlock = dynamic_cast<const Block*>(ifStmt->else_.get())) {
+                    elseHasReturn = checkReturnPaths(elseBlock, expectReturn);
+                } else if (dynamic_cast<const ReturnStmt*>(ifStmt->else_.get())) {
                     elseHasReturn = true;
                 }
             } else {
-                // No else branch: there is a path without return
                 elseHasReturn = false;
             }
 
@@ -544,11 +486,7 @@ bool SemanticAnalyzer::checkReturnPaths(Block* block, bool expectReturn) {
                 hasReturn = true;
             }
         }
-
-        // While-loops may not execute, so they do not count as a definite
-        // return
     }
-
     return hasReturn;
 }
 

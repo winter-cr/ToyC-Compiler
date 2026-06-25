@@ -23,25 +23,24 @@ public:
     Symbol* lookupLocal(const std::string& name) const;
     bool getConstantValue(const std::string& name, int* outValue) const;
 
-    void visit(CompUnit* node) override;
-    void visit(VarDecl* node) override;
-    void visit(ConstDecl* node) override;
-    void visit(FuncDef* node) override;
-    void visit(Param* node) override;
-    void visit(Block* node) override;
-    void visit(IfStmt* node) override;
-    void visit(WhileStmt* node) override;
-    void visit(BreakStmt* node) override;
-    void visit(ContinueStmt* node) override;
-    void visit(ReturnStmt* node) override;
-    void visit(ExprStmt* node) override;
-    void visit(AssignStmt* node) override;
-    void visit(EmptyStmt* node) override;
-    void visit(BinaryExpr* node) override;
-    void visit(UnaryExpr* node) override;
-    void visit(Identifier* node) override;
-    void visit(Number* node) override;
-    void visit(FuncCall* node) override;
+    void visit(const CompUnit& node) override;
+    void visit(const VarDecl& node) override;
+    void visit(const ConstDecl& node) override;
+    void visit(const FuncDef& node) override;
+    void visit(const Param& node) override;
+    void visit(const Block& node) override;
+    void visit(const IfStmt& node) override;
+    void visit(const WhileStmt& node) override;
+    void visit(const BreakStmt& node) override;
+    void visit(const ContinueStmt& node) override;
+    void visit(const ReturnStmt& node) override;
+    void visit(const ExprStmt& node) override;
+    void visit(const AssignStmt& node) override;
+    void visit(const BinaryExpr& node) override;
+    void visit(const UnaryExpr& node) override;
+    void visit(const Identifier& node) override;
+    void visit(const Number& node) override;
+    void visit(const FuncCall& node) override;
 
 private:
     SymbolTable symTable_;
@@ -57,9 +56,9 @@ private:
                        int line, bool isGlobal,
                        std::optional<int> constVal = std::nullopt);
     Symbol* lookupSymbol(const std::string& name);
-    void checkExpr(Expr* expr);
+    void checkExpr(const Expr* expr);
     std::optional<int> evaluateConstExpr(Expr* expr);
-    bool checkReturnPaths(Block* block, bool expectReturn);
+    bool checkReturnPaths(const Block* block, bool expectReturn);
     std::string errorMessage(SemanticErrorCode code);
 };
 
