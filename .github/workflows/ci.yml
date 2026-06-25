@@ -56,8 +56,16 @@ jobs:
         run: |
           sudo apt-get install -y qemu-user gcc-riscv64-linux-gnu
 
+      - name: Dump generated assembly (debug)
+        run: |
+          mkdir -p build/e2e_out
+          build/toyc < tests/basic/return_0.tc > build/e2e_out/return_0.s 2>&1 || true
+          echo "=== return_0.s ==="
+          cat build/e2e_out/return_0.s
+          echo "=== END ==="
+
       - name: Run end-to-end tests (normal mode)
-        run: bash scripts/run_e2e_tests.sh
+        run: bash scripts/run_e2e_tests.sh --verbose
 
       - name: Run end-to-end tests (opt mode)
-        run: bash scripts/run_e2e_tests.sh --opt
+        run: bash scripts/run_e2e_tests.sh --opt --verbose
