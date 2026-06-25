@@ -83,7 +83,8 @@ jobs:
             -nostdlib -nostartfiles -static \
             -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
             -o build/e2e_out/simple_loop.elf build/e2e_out/_start.s build/e2e_out/simple_loop.s 2>&1
-          qemu-riscv32 build/e2e_out/simple_loop.elf 2>/dev/null || true
+          set +e
+          qemu-riscv32 build/e2e_out/simple_loop.elf 2>/dev/null
           echo "exit_simple: $?"
           # Sum loop
           echo "=== loop_sum (expect 5050) ==="
@@ -93,7 +94,7 @@ jobs:
             -nostdlib -nostartfiles -static \
             -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
             -o build/e2e_out/test_ls.elf build/e2e_out/_start.s build/e2e_out/test_ls.s 2>&1
-          qemu-riscv32 build/e2e_out/test_ls.elf 2>/dev/null || true
+          qemu-riscv32 build/e2e_out/test_ls.elf 2>/dev/null
           echo "exit_loop_sum: $?"
 
       - name: Run end-to-end tests (normal mode)
