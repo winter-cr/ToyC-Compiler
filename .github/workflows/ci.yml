@@ -56,6 +56,38 @@ jobs:
         run: |
           sudo apt-get install -y qemu-user gcc-riscv64-linux-gnu
 
+      - name: Debug function_call and loop_sum
+        run: |
+          mkdir -p build/e2e_out
+          cat > build/e2e_out/_start.s <<'ASM'
+            .section .text.start
+            .globl _start
+          _start:
+            call main
+            li a7, 93
+            ecall
+          ASM
+          echo "=== function_call.tc ==="
+          build/toyc < tests/basic/function_call.tc > build/e2e_out/fn_call.s 2>&1
+          cat build/e2e_out/fn_call.s
+          echo "=== loop_sum.tc ==="
+          build/toyc < tests/performance/loop_sum.tc > build/e2e_out/loop_sum.s 2>&1
+          cat build/e2e_out/loop_sum.s
+          echo "=== link & run function_call ==="
+          riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 \
+            -nostdlib -nostartfiles -static \
+            -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
+            -o build/e2e_out/fn_call.elf build/e2e_out/_start.s build/e2e_out/fn_call.s 2>&1
+          qemu-riscv32 build/e2e_out/fn_call.elf 2>&1
+          echo "exit: $?" || true
+          echo "=== link & run loop_sum ==="
+          riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 \
+            -nostdlib -nostartfiles -static \
+            -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none \
+            -o build/e2e_out/loop_sum.elf build/e2e_out/_start.s build/e2e_out/loop_sum.s 2>&1
+          qemu-riscv32 build/e2e_out/loop_sum.elf 2>&1
+          echo "exit: $?" || true
+
       - name: Run end-to-end tests (normal mode)
         run: bash scripts/run_e2e_tests.sh --verbose
 
