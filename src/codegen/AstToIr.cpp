@@ -186,11 +186,11 @@ void AstToIr::visit(const FuncDef& node) {
 
     backend::FunctionBuilder funcBuilder(node.name, node.returnType->is_int());
 
+    builder_ = &funcBuilder;
+
     for (auto& param : node.params) {
         param->accept(*this);
     }
-
-    builder_ = &funcBuilder;
 
     if (node.body) {
         node.body->accept(*this);
