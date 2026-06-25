@@ -331,8 +331,9 @@ toyc::backend::Program DOptimizer::optimizeIR(toyc::backend::Program program) {
 std::string DOptimizer::optimizeAssembly(const std::string& assembly) {
     std::string result = assembly;
     result = removeSelfMoves(result);
-    result = simplifyAddMulWithZeroOne(result);
     result = removeDeadJumpsAsm(result);
+    // simplifyAddMulWithZeroOne disabled: sub with zero-on-left is not
+    // identity (0 - x = -x ≠ x), and local peephole can't verify liveness.
     return result;
 }
 
