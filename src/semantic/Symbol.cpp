@@ -1,5 +1,5 @@
-#include "Symbol.h"
-#include <iostream>
+#include "semantic/Symbol.h"
 
-// Symbol实现比较简单，大部分逻辑在SymbolTable和SemanticAnalyzer中
-// 这里可以留空或添加辅助方法
+namespace toyc {
+// Symbol is header-only (all inline), this file exists for future use
+} // namespace toyc

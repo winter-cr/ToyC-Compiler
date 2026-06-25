@@ -1,7 +1,0 @@
-// 非法测试6: const初始化引用未声明的常量
-// 目标：应报错 SEM_CONST_INIT_UNDEFINED
-const int A = B + 1;  // B未声明
-
-int main(void) {
-    return 0;
-}

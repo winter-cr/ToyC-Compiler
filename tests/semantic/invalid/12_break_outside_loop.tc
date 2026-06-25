@@ -1,6 +1,5 @@
-// 非法测试12: break语句不在循环内
-// 目标：应报错 SEM_BREAK_OUTSIDE_LOOP
+// ERR_BREAK_OUTSIDE_LOOP: break statement not inside a loop
 int main(void) {
-    break;  // break必须位于循环内
+    break;
     return 0;
 }

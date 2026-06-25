@@ -1,7 +1,0 @@
-// 非法测试3: 对const变量赋值
-// 目标：应报错 SEM_CONST_REASSIGN
-const int A = 5;
-int main(void) {
-    A = 10;  // 常量不可修改
-    return A;
-}

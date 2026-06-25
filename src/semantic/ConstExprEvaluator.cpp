@@ -1,138 +1,83 @@
-#include "ConstExprEvaluator.h"
-#include "SemanticAnalyzer.h"
-#include "AST.h"
-#include "errors.h"
-#include <stdexcept>
+#include "semantic/ConstExprEvaluator.h"
+#include "semantic/Symbol.h"
 
-namespace semantic {
 
-ConstExprEvaluator::EvalResult ConstExprEvaluator::evaluate(ast::Expr* expr) {
-    if (!expr) {
-        return {std::nullopt, SemanticErrorCode::ERR_CONST_INIT_UNDEFINED};
-    }
+namespace toyc {
 
-    // 根据具体类型分发
-    if (auto* num = dynamic_cast<ast::Number*>(expr)) {
-        return {num->value, SemanticErrorCode::ERR_OK};
-    }
-    if (auto* id = dynamic_cast<ast::Identifier*>(expr)) {
-        return evaluateIdentifier(id->name, expr->line);
-    }
-    if (auto* unary = dynamic_cast<ast::UnaryOp*>(expr)) {
-        auto operand = evaluate(unary->operand);
-        if (!operand.value.has_value()) {
-            return {std::nullopt, operand.error};
-        }
-        auto result = evaluateUnary(unary->op, operand.value, expr->line);
-        return {result, SemanticErrorCode::ERR_OK};
-    }
-    if (auto* bin = dynamic_cast<ast::BinaryOp*>(expr)) {
-        auto left = evaluate(bin->left);
-        if (!left.value.has_value()) {
-            return {std::nullopt, left.error};
-        }
-        // 短路逻辑
-        if (bin->op == "&&" || bin->op == "||") {
-            bool shortResult;
-            if (shouldShortCircuit(bin->op, left.value, shortResult)) {
-                return {shortResult ? 1 : 0, SemanticErrorCode::ERR_OK};
-            }
-        }
-        auto right = evaluate(bin->right);
-        if (!right.value.has_value()) {
-            return {std::nullopt, right.error};
-        }
-        auto binResult = evaluateBinary(bin->op, left.value, right.value, expr->line);
-        if (!binResult.has_value()) {
-            // 除零错误（/ 或 % 操作符导致）
-            return {std::nullopt, SemanticErrorCode::ERR_DIVIDE_BY_ZERO};
-        }
-        return {binResult.value(), SemanticErrorCode::ERR_OK};
-    }
-    if (auto* call = dynamic_cast<ast::FuncCall*>(expr)) {
-        // 函数调用不是常量表达式
-        return {std::nullopt, SemanticErrorCode::ERR_CONST_INIT_UNDEFINED};
-    }
-
-    return {std::nullopt, SemanticErrorCode::ERR_CONST_INIT_UNDEFINED};
-}
-
-ConstExprEvaluator::EvalResult ConstExprEvaluator::evaluateIdentifier(const std::string& name, int line) {
-    Symbol* sym = analyzer_->lookupGlobal(name);
-    if (!sym) {
-        return {std::nullopt, SemanticErrorCode::ERR_CONST_INIT_UNDEFINED};  // 未声明的常量
-    }
-    if (!sym->isConst) {
-        return {std::nullopt, SemanticErrorCode::ERR_CONST_EXPR_NON_CONST};  // 非常量
-    }
-    auto val = sym->getConstValue();
-    if (!val.has_value()) {
-        return {std::nullopt, SemanticErrorCode::ERR_CONST_INIT_UNDEFINED};
-    }
-    return {val.value(), SemanticErrorCode::ERR_OK};
-}
-
-std::optional<int> ConstExprEvaluator::evaluateUnary(const std::string& op, std::optional<int> operand, int line) {
-    if (!operand.has_value()) return std::nullopt;
-
-    int val = operand.value();
-    if (op == "+") return val;
-    if (op == "-") return -val;
-    if (op == "!") return val == 0 ? 1 : 0;
-
+std::optional<int> ConstExprEvaluator::evaluate(Expr* expr) {
+    if (!expr) return std::nullopt;
+    if (auto* n = dynamic_cast<Number*>(expr)) return evalNumber(n);
+    if (auto* id = dynamic_cast<Identifier*>(expr)) return evalIdentifier(id);
+    if (auto* bin = dynamic_cast<BinaryExpr*>(expr)) return evalBinary(bin);
+    if (auto* un = dynamic_cast<UnaryExpr*>(expr)) return evalUnary(un);
     return std::nullopt;
 }
 
-std::optional<int> ConstExprEvaluator::evaluateBinary(const std::string& op, std::optional<int> left,
-                                                     std::optional<int> right, int line) {
+std::optional<int> ConstExprEvaluator::evalNumber(Number* node) {
+    return node->value;
+}
+
+std::optional<int> ConstExprEvaluator::evalIdentifier(Identifier* node) {
+    Symbol* sym = symTable_.lookup(node->name);
+    if (sym && sym->isConst && sym->constValue.has_value()) {
+        return sym->constValue;
+    }
+    return std::nullopt;
+}
+
+std::optional<int> ConstExprEvaluator::evalBinary(BinaryExpr* node) {
+    using Op = BinaryExpr::Op;
+
+    if (node->op == Op::AND) {
+        auto left = evaluate(node->left.get());
+        if (!left.has_value()) return std::nullopt;
+        if (left.value() == 0) return 0;
+        return evaluate(node->right.get());
+    }
+    if (node->op == Op::OR) {
+        auto left = evaluate(node->left.get());
+        if (!left.has_value()) return std::nullopt;
+        if (left.value() != 0) return 1;
+        return evaluate(node->right.get());
+    }
+
+    auto left = evaluate(node->left.get());
+    auto right = evaluate(node->right.get());
     if (!left.has_value() || !right.has_value()) return std::nullopt;
 
     int l = left.value();
     int r = right.value();
 
-    // 算术运算
-    if (op == "+") return l + r;
-    if (op == "-") return l - r;
-    if (op == "*") return l * r;
-    if (op == "/") {
-        if (r == 0) return std::nullopt;  // 除零
-        return l / r;
+    switch (node->op) {
+        case Op::ADD: return l + r;
+        case Op::SUB: return l - r;
+        case Op::MUL: return l * r;
+        case Op::DIV:
+            if (r == 0) return std::nullopt;
+            return l / r;
+        case Op::MOD:
+            if (r == 0) return std::nullopt;
+            return l % r;
+        case Op::EQ:  return (l == r) ? 1 : 0;
+        case Op::NE:  return (l != r) ? 1 : 0;
+        case Op::LT:  return (l < r)  ? 1 : 0;
+        case Op::LE:  return (l <= r) ? 1 : 0;
+        case Op::GT:  return (l > r)  ? 1 : 0;
+        case Op::GE:  return (l >= r) ? 1 : 0;
+        default: return std::nullopt;
     }
-    if (op == "%") {
-        if (r == 0) return std::nullopt;
-        return l % r;
-    }
-
-    // 关系运算
-    if (op == "<")  return l < r ? 1 : 0;
-    if (op == ">")  return l > r ? 1 : 0;
-    if (op == "<=") return l <= r ? 1 : 0;
-    if (op == ">=") return l >= r ? 1 : 0;
-    if (op == "==") return l == r ? 1 : 0;
-    if (op == "!=") return l != r ? 1 : 0;
-
-    // 逻辑运算
-    if (op == "&&") return (l != 0 && r != 0) ? 1 : 0;
-    if (op == "||") return (l != 0 || r != 0) ? 1 : 0;
-
-    return std::nullopt;
 }
 
-bool ConstExprEvaluator::shouldShortCircuit(const std::string& op, std::optional<int> left, bool& result) {
-    if (!left.has_value()) return false;
+std::optional<int> ConstExprEvaluator::evalUnary(UnaryExpr* node) {
+    auto val = evaluate(node->operand.get());
+    if (!val.has_value()) return std::nullopt;
 
-    if (op == "&&") {
-        if (left.value() == 0) {
-            result = 0;
-            return true;
-        }
-    } else if (op == "||") {
-        if (left.value() != 0) {
-            result = 1;
-            return true;
-        }
+    switch (node->op) {
+        case UnaryExpr::Op::PLUS:  return val.value();
+        case UnaryExpr::Op::MINUS: return -val.value();
+        case UnaryExpr::Op::NOT:   return (val.value() == 0) ? 1 : 0;
+        default: return std::nullopt;
     }
-    return false;
 }
 
-} // namespace semantic
+} // namespace toyc

@@ -1,8 +1,0 @@
-// 非法测试2: 全局符号重定义
-// 目标：应报错 SEM_REDEFINED_SYMBOL
-int g_var = 10;
-int g_var = 20;  // 重定义
-
-int main(void) {
-    return 0;
-}

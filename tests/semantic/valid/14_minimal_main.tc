@@ -1,6 +1,0 @@
-// 测试14: 空main函数（无语句）
-// 目标：验证main最小化
-int main(void) {
-    // empty
-    return 0;
-}

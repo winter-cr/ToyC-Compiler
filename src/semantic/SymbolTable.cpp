@@ -1,76 +1,53 @@
-#include "SymbolTable.h"
-#include <stdexcept>
+#include "semantic/SymbolTable.h"
 
-namespace semantic {
+namespace toyc {
 
-SymbolTable::SymbolTable() : scopeLevel_(0) {
-    scopeStack_.push_back(std::make_unique<Scope>(0));
+SymbolTable::SymbolTable() {
+    pushScope();
 }
 
-void SymbolTable::clear() {
-    scopeStack_.clear();
-    scopeLevel_ = 0;
-    scopeStack_.push_back(std::make_unique<Scope>(0));
+void SymbolTable::pushScope() {
+    scopes_.emplace_back();
 }
 
-void SymbolTable::reset() {
-    clear();
-}
-
-void SymbolTable::enterScope() {
-    scopeLevel_++;
-    scopeStack_.push_back(std::make_unique<Scope>(scopeLevel_));
-}
-
-void SymbolTable::exitScope() {
-    if (scopeStack_.empty() || scopeStack_.size() == 1) {
-        throw std::runtime_error("SymbolTable: exitScope() on empty stack or trying to exit global scope");
-    }
-    scopeStack_.pop_back();
-    scopeLevel_--;
+void SymbolTable::popScope() {
+    if (scopes_.size() <= 1) return;
+    scopes_.pop_back();
 }
 
 bool SymbolTable::insert(std::unique_ptr<Symbol> sym) {
-    if (scopeStack_.empty()) return false;
-    Scope* current = scopeStack_.back().get();
-
-    if (current->symbols.find(sym->name) != current->symbols.end()) {
-        return false;
-    }
-
-    current->symbols[sym->name] = std::move(sym);
-    current->symbols[sym->name]->isGlobal = (current->level == 0);
+    if (!sym) return false;
+    auto& current = scopes_.back();
+    if (current.count(sym->name) > 0) return false;
+    current[sym->name] = std::move(sym);
     return true;
 }
 
 Symbol* SymbolTable::lookup(const std::string& name) {
-    for (auto it = scopeStack_.rbegin(); it != scopeStack_.rend(); ++it) {
-        auto& symbols = it->get()->symbols;
-        auto found = symbols.find(name);
-        if (found != symbols.end()) return found->second.get();
+    for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+        auto found = it->find(name);
+        if (found != it->end()) return found->second.get();
     }
     return nullptr;
 }
 
-Symbol* SymbolTable::lookupCurrentScope(const std::string& name) {
-    if (scopeStack_.empty()) return nullptr;
-    Scope* current = scopeStack_.back().get();
-    auto found = current->symbols.find(name);
-    return found != current->symbols.end() ? found->second.get() : nullptr;
+Symbol* SymbolTable::lookupCurrentScope(const std::string& name) const {
+    auto& current = scopes_.back();
+    auto found = current.find(name);
+    if (found != current.end()) return found->second.get();
+    return nullptr;
 }
 
-bool SymbolTable::isDefinedInCurrentScope(const std::string& name) const {
-    if (scopeStack_.empty()) return false;
-    const Scope* current = scopeStack_.back().get();
-    return current->symbols.find(name) != current->symbols.end();
+Symbol* SymbolTable::lookupGlobal(const std::string& name) const {
+    if (scopes_.empty()) return nullptr;
+    auto& global = scopes_.front();
+    auto found = global.find(name);
+    if (found != global.end()) return found->second.get();
+    return nullptr;
 }
 
-const std::unordered_map<std::string, std::unique_ptr<Symbol>>& SymbolTable::currentScopeSymbols() const {
-    if (scopeStack_.empty()) {
-        static std::unordered_map<std::string, std::unique_ptr<Symbol>> empty;
-        return empty;
-    }
-    return scopeStack_.back()->symbols;
+int SymbolTable::currentLevel() const {
+    return static_cast<int>(scopes_.size()) - 1;
 }
 
-} // namespace semantic
+} // namespace toyc

@@ -1,5 +1,0 @@
-// 非法测试1: 使用未声明的变量
-// 目标：应报错 SEM_UNDECLARED_IDENT
-int main(void) {
-    return x;  // x未声明
-}

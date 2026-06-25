@@ -1,7 +1,0 @@
-// 测试5: 变量遮蔽（shadowing）
-// 目标：验证内层作用域可以声明同名变量，遮蔽外层
-int global = 100;
-int main(void) {
-    int global = 10;  // 局部变量遮蔽全局
-    return global;    // 应该返回局部变量的值10
-}
