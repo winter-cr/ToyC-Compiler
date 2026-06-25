@@ -121,7 +121,7 @@ stdin (ToyC 源码)
 | **A** | 前端负责人 | 词法分析（Lexer）、递归下降语法分析（Parser）、AST 节点定义、AstPrinter、前端文档 | Lexer, Parser, AST.h, ASTBase.h, AstPrinter, FrontEnd.md |
 | **B** | 语义负责人 | 符号表（嵌套作用域）、语义分析器、常量表达式求值器、错误码定义、语义测试用例 | SymbolTable, SemanticAnalyzer, ConstExprEvaluator, errors.h, 16 valid + 16 invalid 测试 |
 | **C** | 后端负责人 | IR 设计（Program/FunctionBuilder）、RISC-V32 CodeGen、优化器（常量折叠/死代码/分支简化/寄存器复用）、Text IR CLI、后端测试 | ir.hpp, riscv32_codegen.cpp, optimizer.cpp, text_ir.cpp |
-| **D** | 测试与集成负责人 | 自动化测试脚本、CI/CD 配置、Git 分支合并管理、实践报告汇总、OJ 评测数据分析、代行 B/C 模块接口集成 | smoke test, e2e test, CI, AstToIr（代行）, CMakeLists 集成 |
+| **D** | 测试与优化负责人 | 自动化测试脚本、CI/CD 配置、Git 分支合并管理、**性能优化（DOptimizer）**、实践报告汇总、OJ 评测数据分析、代行 B/C 模块接口集成 | smoke test, e2e test, CI, **DOptimizer（IR跳转合并+汇编Peephole）**, AstToIr（代行）, CMakeLists 集成 |
 
 ---
 
@@ -181,12 +181,28 @@ stdin (ToyC 源码)
 - **控制流**：条件分支用 `slt` + `bnez`/`j` 实现，`while` 循环用 `j condition; condition: ...; body: ...; j condition; end:` 结构
 - **全局变量**：通过 `.data`/`.rodata` 段定义，`la t6, name; lw/sw reg, 0(t6)` 访问
 
-### 5.7 优化器（Optimizer，C）
+### 5.7 基础优化器（backend::optimize，C）
 
 - **常量折叠**：编译期计算常量一元/二元运算，包括除零保护
 - **常量分支简化**：静态确定条件时直接跳转到目标
 - **死代码删除**：移除不再使用的临时值
 - 所有优化均为保守优化，不改变程序语义
+
+### 5.8 D 的优化模块（DOptimizer，D）
+
+根据开发任务分工，D 成员负责性能优化和 `-opt` 参数验证。在 C 的基础 IR 优化之上，D 实现了独立的二级优化模块 `src/optimizer/DOptimizer`，包含两层优化：
+
+**IR 级优化**（`optimizeIR`）：
+- **跳转合并（Jump Threading）**：将跳转到跳转的指令重定向到最终目标（`j L1` → `j L2` 当 L1 处只有 `j L2`），减少跳转链
+- **死跳转删除（Dead Jump Removal）**：删除跳到紧邻下一条指令的无用跳转（`j L; L:` → 直接删除 `j L`）
+- **冗余复制消除（Redundant Copy Elimination）**：跟踪 IR Copy 指令的 def-use 链，移除未被读取的冗余复制
+
+**汇编级 Peephole 优化**（`optimizeAssembly`）：
+- **自移动消除**：移除 `mv tX, tX` 形式的无用指令
+- **零/一算术简化**：`li tX, 0; add tZ, tY, tX` → `mv tZ, tY`（加零即恒等）；`li tX, 1; mul tZ, tY, tX` → `mv tZ, tY`（乘一即恒等）
+- **死跳转删除**：汇编层面的 `j label; label:` 模式消除
+
+**优化管线**（`-opt` 模式）：AstToIr → C 的基础优化（常量折叠/分支简化） → D 的 IR 优化（跳转合并/死跳转/复制消除） → CodeGen → D 的汇编 Peephole
 
 ---
 
@@ -317,10 +333,11 @@ f01_minimal, f02_assignment, f03_if_else, f04_while_break, f05_function_call, f0
 | `src/semantic/SymbolTable.h/.cpp` | 嵌套作用域符号表 |
 | `src/semantic/ConstExprEvaluator.h/.cpp` | 常量表达式求值器 |
 | `src/codegen/AstToIr.h/.cpp` | AST→IR 转换器（ASTVisitor 实现） |
+| `src/optimizer/DOptimizer.h/.cpp` | **D 的优化模块（IR 跳转合并 + 汇编 Peephole）** |
 | `backend/include/toyc/backend/ir.hpp` | 后端 IR 定义（Program, FunctionBuilder） |
 | `backend/src/riscv32_codegen.cpp` | RISC-V32 代码生成器 |
-| `backend/src/optimizer.cpp` | IR 优化器 |
-| `src/main.cpp` | 编译器入口，串联完整管线 |
+| `backend/src/optimizer.cpp` | 基础 IR 优化器（C） |
+| `src/main.cpp` | 编译器入口，串联完整管线（含 D 的优化管线） |
 | `scripts/run_e2e_tests.sh` | 端到端测试脚本 |
 | `.github/workflows/ci.yml` | CI/CD 配置 |
 
