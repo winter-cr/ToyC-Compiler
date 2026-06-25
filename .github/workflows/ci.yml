@@ -62,7 +62,27 @@ jobs:
           build/toyc < tests/basic/return_0.tc > build/e2e_out/return_0.s 2>&1 || true
           echo "=== return_0.s ==="
           cat build/e2e_out/return_0.s
+          echo "=== _start.s ==="
+          cat build/e2e_out/_start.s
           echo "=== END ==="
+
+      - name: Debug QEMU
+        run: |
+          echo "=== which qemu-riscv32 ==="
+          which qemu-riscv32 || echo "NOT FOUND"
+          echo "=== available qemu-* ==="
+          ls /usr/bin/qemu-* 2>/dev/null || echo "NONE"
+          echo "=== qemu-riscv32 test ==="
+          mkdir -p build/e2e_out
+          build/toyc < tests/basic/return_7.tc > build/e2e_out/return_7.s 2>&1 || true
+          riscv64-linux-gnu-gcc -march=rv32im -mabi=ilp32 -nostdlib -nostartfiles \
+            -Wl,-e,_start -Wl,-Ttext=0x10000 \
+            -o build/e2e_out/return_7.elf build/e2e_out/_start.s build/e2e_out/return_7.s 2>&1
+          echo "=== elf info ==="
+          riscv64-linux-gnu-readelf -h build/e2e_out/return_7.elf 2>&1 || true
+          echo "=== run qemu ==="
+          qemu-riscv32 build/e2e_out/return_7.elf 2>&1
+          echo "exit code: $?"
 
       - name: Run end-to-end tests (normal mode)
         run: bash scripts/run_e2e_tests.sh --verbose
