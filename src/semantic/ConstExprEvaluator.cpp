@@ -26,15 +26,13 @@ std::optional<int> ConstExprEvaluator::evalIdentifier(Identifier* node) {
 }
 
 std::optional<int> ConstExprEvaluator::evalBinary(BinaryExpr* node) {
-    using Op = BinaryExpr::Op;
-
-    if (node->op == Op::AND) {
+    if (node->op == BinaryOp::And) {
         auto left = evaluate(node->left.get());
         if (!left.has_value()) return std::nullopt;
         if (left.value() == 0) return 0;
         return evaluate(node->right.get());
     }
-    if (node->op == Op::OR) {
+    if (node->op == BinaryOp::Or) {
         auto left = evaluate(node->left.get());
         if (!left.has_value()) return std::nullopt;
         if (left.value() != 0) return 1;
@@ -49,21 +47,21 @@ std::optional<int> ConstExprEvaluator::evalBinary(BinaryExpr* node) {
     int r = right.value();
 
     switch (node->op) {
-        case Op::ADD: return l + r;
-        case Op::SUB: return l - r;
-        case Op::MUL: return l * r;
-        case Op::DIV:
+        case BinaryOp::Add: return l + r;
+        case BinaryOp::Sub: return l - r;
+        case BinaryOp::Mul: return l * r;
+        case BinaryOp::Div:
             if (r == 0) return std::nullopt;
             return l / r;
-        case Op::MOD:
+        case BinaryOp::Mod:
             if (r == 0) return std::nullopt;
             return l % r;
-        case Op::EQ:  return (l == r) ? 1 : 0;
-        case Op::NE:  return (l != r) ? 1 : 0;
-        case Op::LT:  return (l < r)  ? 1 : 0;
-        case Op::LE:  return (l <= r) ? 1 : 0;
-        case Op::GT:  return (l > r)  ? 1 : 0;
-        case Op::GE:  return (l >= r) ? 1 : 0;
+        case BinaryOp::Eq:  return (l == r) ? 1 : 0;
+        case BinaryOp::Ne:  return (l != r) ? 1 : 0;
+        case BinaryOp::Lt:  return (l < r)  ? 1 : 0;
+        case BinaryOp::Le:  return (l <= r) ? 1 : 0;
+        case BinaryOp::Gt:  return (l > r)  ? 1 : 0;
+        case BinaryOp::Ge:  return (l >= r) ? 1 : 0;
         default: return std::nullopt;
     }
 }
@@ -73,9 +71,9 @@ std::optional<int> ConstExprEvaluator::evalUnary(UnaryExpr* node) {
     if (!val.has_value()) return std::nullopt;
 
     switch (node->op) {
-        case UnaryExpr::Op::PLUS:  return val.value();
-        case UnaryExpr::Op::MINUS: return -val.value();
-        case UnaryExpr::Op::NOT:   return (val.value() == 0) ? 1 : 0;
+        case UnaryOp::Plus:  return val.value();
+        case UnaryOp::Minus: return -val.value();
+        case UnaryOp::Not:   return (val.value() == 0) ? 1 : 0;
         default: return std::nullopt;
     }
 }

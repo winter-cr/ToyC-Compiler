@@ -226,7 +226,7 @@ void SemanticAnalyzer::visit(ConstDecl* node) {
 void SemanticAnalyzer::visit(FuncDef* node) {
     // Check main function signature
     if (node->name == "main") {
-        if (!node->returnType || !node->returnType->isInt()) {
+        if (!node->returnType || !node->returnType->is_int()) {
             error(node->line, node->column,
                   SemanticErrorCode::ERR_INVALID_MAIN_SIGNATURE,
                   "main function must return int");
@@ -248,7 +248,7 @@ void SemanticAnalyzer::visit(FuncDef* node) {
         auto funcSym = std::make_unique<Symbol>(node->name, SymbolKind::FUNCTION,
                                                  node->line, true);
         funcSym->paramCount = static_cast<int>(node->params.size());
-        funcSym->returnsInt = node->returnType && node->returnType->isInt();
+        funcSym->returnsInt = node->returnType && node->returnType->is_int();
 
         if (symTable_.lookupCurrentScope(node->name)) {
             error(node->line, node->column,
@@ -287,7 +287,7 @@ void SemanticAnalyzer::visit(FuncDef* node) {
     }
 
     // Check return paths for int-returning functions
-    if (node->returnType && node->returnType->isInt()) {
+    if (node->returnType && node->returnType->is_int()) {
         if (node->body && !checkReturnPaths(node->body.get(), true)) {
             error(node->line, node->column,
                   SemanticErrorCode::ERR_MISSING_RETURN,
@@ -316,20 +316,20 @@ void SemanticAnalyzer::visit(Block* node) {
 }
 
 void SemanticAnalyzer::visit(IfStmt* node) {
-    if (node->condition) {
-        checkExpr(node->condition.get());
+    if (node->cond) {
+        checkExpr(node->cond.get());
     }
-    if (node->thenBranch) {
-        node->thenBranch->accept(*this);
+    if (node->then) {
+        node->then->accept(*this);
     }
-    if (node->elseBranch) {
-        node->elseBranch->accept(*this);
+    if (node->else_) {
+        node->else_->accept(*this);
     }
 }
 
 void SemanticAnalyzer::visit(WhileStmt* node) {
-    if (node->condition) {
-        checkExpr(node->condition.get());
+    if (node->cond) {
+        checkExpr(node->cond.get());
     }
     loopDepth_++;
     if (node->body) {
@@ -357,9 +357,9 @@ void SemanticAnalyzer::visit(ContinueStmt* node) {
 void SemanticAnalyzer::visit(ReturnStmt* node) {
     if (currentFunction_) {
         bool funcReturnsInt = currentFunction_->returnType &&
-                              currentFunction_->returnType->isInt();
+                              currentFunction_->returnType->is_int();
         bool funcReturnsVoid = currentFunction_->returnType &&
-                               currentFunction_->returnType->isVoid();
+                               currentFunction_->returnType->is_void();
 
         if (funcReturnsInt && !node->value) {
             error(node->line, node->column,
@@ -421,8 +421,8 @@ void SemanticAnalyzer::visit(BinaryExpr* node) {
         checkExpr(node->right.get());
     }
     // Check for division by zero in constant expressions
-    if ((node->op == BinaryExpr::Op::DIV ||
-         node->op == BinaryExpr::Op::MOD) && node->right) {
+    if ((node->op == BinaryOp::Div ||
+         node->op == BinaryOp::Mod) && node->right) {
         auto rightVal = evaluateConstExpr(node->right.get());
         if (rightVal.has_value() && rightVal.value() == 0) {
             error(node->line, node->column,
@@ -476,7 +476,7 @@ void SemanticAnalyzer::visit(FuncCall* node) {
 
     // Check argument count
     int expectedArgs = sym->paramCount;
-    int actualArgs = static_cast<int>(node->arguments.size());
+    int actualArgs = static_cast<int>(node->args.size());
     if (expectedArgs != actualArgs) {
         error(node->line, node->column,
               SemanticErrorCode::ERR_WRONG_ARG_COUNT,
@@ -486,7 +486,7 @@ void SemanticAnalyzer::visit(FuncCall* node) {
     }
 
     // Check all argument expressions
-    for (auto& arg : node->arguments) {
+    for (auto& arg : node->args) {
         if (arg) {
             checkExpr(arg.get());
         }
@@ -517,22 +517,22 @@ bool SemanticAnalyzer::checkReturnPaths(Block* block, bool expectReturn) {
             bool thenHasReturn = false;
             bool elseHasReturn = false;
 
-            if (ifStmt->thenBranch) {
+            if (ifStmt->then) {
                 if (auto* thenBlock =
-                        dynamic_cast<Block*>(ifStmt->thenBranch.get())) {
+                        dynamic_cast<Block*>(ifStmt->then.get())) {
                     thenHasReturn = checkReturnPaths(thenBlock, true);
                 } else if (dynamic_cast<ReturnStmt*>(
-                               ifStmt->thenBranch.get())) {
+                               ifStmt->then.get())) {
                     thenHasReturn = true;
                 }
             }
 
-            if (ifStmt->elseBranch) {
+            if (ifStmt->else_) {
                 if (auto* elseBlock =
-                        dynamic_cast<Block*>(ifStmt->elseBranch.get())) {
+                        dynamic_cast<Block*>(ifStmt->else_.get())) {
                     elseHasReturn = checkReturnPaths(elseBlock, true);
                 } else if (dynamic_cast<ReturnStmt*>(
-                               ifStmt->elseBranch.get())) {
+                               ifStmt->else_.get())) {
                     elseHasReturn = true;
                 }
             } else {

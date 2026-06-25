@@ -1,13 +1,17 @@
+#include "ast/AstPrinter.h"
+#include "codegen/AstToIr.h"
+#include "lexer/LexError.h"
+#include "lexer/Lexer.h"
+#include "parser/Parser.h"
+#include "semantic/SemanticAnalyzer.h"
+#include "toyc/backend/optimizer.hpp"
+#include "toyc/backend/riscv32_codegen.hpp"
+
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <sstream>
 #include <string>
-
-#include "ast/AstPrinter.h"
-#include "lexer/LexError.h"
-#include "lexer/Lexer.h"
-#include "parser/Parser.h"
 
 namespace {
 
@@ -45,9 +49,9 @@ int main(int argc, char* argv[]) {
             return 1;
         }
     }
-    (void)optimize;
 
     try {
+        // 1. Lex + Parse
         const std::string source = read_all_stdin();
         Lexer lexer(source);
         Parser parser(lexer.tokens());
@@ -71,8 +75,31 @@ int main(int argc, char* argv[]) {
             printer.print(*ast);
         }
 
-        // 语义分析与代码生成由后续模块负责
-        std::cout << "// ToyC frontend: parse succeeded\n";
+        // 2. Semantic analysis
+        toyc::SemanticAnalyzer analyzer;
+        if (!analyzer.analyze(ast.get())) {
+            for (const auto& err : analyzer.errors()) {
+                std::cerr << err.line << ":" << err.column << ": error: ["
+                          << static_cast<int>(err.code) << "] "
+                          << err.message << '\n';
+            }
+            return 1;
+        }
+
+        // 3. AST → IR
+        toyc::AstToIr ast2ir;
+        auto program = ast2ir.convert(ast.get());
+
+        // 4. Optional optimization
+        if (optimize) {
+            program = toyc::backend::optimize(std::move(program));
+        }
+
+        // 5. Code generation
+        toyc::backend::CodegenOptions options;
+        options.emit_comments = env_enabled("TOYC_EMIT_COMMENTS");
+        std::cout << toyc::backend::RiscV32CodeGenerator{options}.generate(program);
+
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';
         return 1;

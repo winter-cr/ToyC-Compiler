@@ -17,9 +17,18 @@ add_executable(toyc
     src/semantic/SymbolTable.cpp
     src/semantic/SemanticAnalyzer.cpp
     src/semantic/ConstExprEvaluator.cpp
+    src/codegen/AstToIr.cpp
+    backend/src/ir.cpp
+    backend/src/optimizer.cpp
+    backend/src/riscv32_codegen.cpp
+    backend/src/text_ir.cpp
 )
 
-target_include_directories(toyc PRIVATE src ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(toyc PRIVATE
+    src
+    backend/include
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
 
 if(MSVC)
     target_compile_options(toyc PRIVATE /W4 /permissive-)
