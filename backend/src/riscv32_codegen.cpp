@@ -69,17 +69,10 @@ void collectVirtualRegister(const std::optional<Value>& value,
     }
 }
 
-RegisterMap assignRegisters(const Function& function) {
-    RegisterMap registers;
-    for (const auto& instruction : function.instructions) {
-        collectVirtualRegister(instruction.destination, registers);
-        collectVirtualRegister(instruction.left, registers);
-        collectVirtualRegister(instruction.right, registers);
-        for (const auto& argument : instruction.arguments) {
-            collectVirtualRegister(argument, registers);
-        }
-    }
-    return registers;
+RegisterMap assignRegisters(const Function& /*function*/) {
+    // Return empty: all virtual registers spill to stack instead of
+    // callee-saved regs, eliminating mv-sN/tX double-spill chains.
+    return {};
 }
 
 SlotMap assignSlots(const Function& function, const RegisterMap& registers,

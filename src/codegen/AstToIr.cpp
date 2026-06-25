@@ -143,8 +143,12 @@ void AstToIr::visit(const CompUnit& node) {
 void AstToIr::visit(const VarDecl& node) {
     if (node.isGlobal) {
         int initVal = 0;
-        if (auto* n = dynamic_cast<Number*>(node.initExpr.get())) {
-            initVal = n->value;
+        if (node.initExpr) {
+            if (auto* n = dynamic_cast<Number*>(node.initExpr.get())) {
+                initVal = n->value;
+            }
+            // Non-literal initializers default to 0; semantic analysis
+            // should have already verified compile-time evaluability.
         }
         program_.globals.push_back(backend::Global{node.name, initVal, false});
     } else {
@@ -214,11 +218,15 @@ void AstToIr::visit(const Param& node) {
 // ---- Visitor: Statements ----
 
 void AstToIr::visit(const Block& node) {
+    // Save/restore locals_ for block scope: variables declared inside
+    // this block shadow outer ones and go out of scope on exit.
+    auto saved_locals = locals_;
     for (auto& stmt : node.statements) {
         if (stmt) {
             stmt->accept(*this);
         }
     }
+    locals_ = std::move(saved_locals);
 }
 
 void AstToIr::visit(const IfStmt& node) {
@@ -269,9 +277,16 @@ void AstToIr::visit(const ReturnStmt& node) {
 }
 
 void AstToIr::visit(const ExprStmt& node) {
-    if (builder_ && node.expr) {
-        emitExpr(node.expr.get(), *builder_);
+    if (!builder_ || !node.expr) return;
+    // Route void function calls to statement-level handler (no return
+    // value capture), all other expressions through emitExpr.
+    if (auto* call = dynamic_cast<FuncCall*>(node.expr.get())) {
+        if (call->isStatement) {
+            visit(*call);
+            return;
+        }
     }
+    emitExpr(node.expr.get(), *builder_);
 }
 
 void AstToIr::visit(const AssignStmt& node) {
