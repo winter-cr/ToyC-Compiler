@@ -134,9 +134,17 @@ tests/
 
 ### 4.3 CI/CD
 
-- 触发器：PR 到 main、push 到 main/feature 分支、手动触发
-- 步骤：checkout → 安装依赖 → 构建 → 冒烟测试
-- 端到端 CI 待后端与前端管线完全串联后启用
+CI 配置在 `.github/workflows/ci.yml`，分三个阶段：
+
+| 阶段 | Job | 内容 | 状态 |
+|:---:|---|------|:---:|
+| 一 | `build-and-smoke-test` | CMake 构建 + CTest 冒烟测试 | ✅ |
+| 二 | `e2e-tests` (normal) | 安装 RISC-V 工具链 → 端到端测试（24 用例） | ✅ |
+| 三 | `e2e-tests` (opt) | 同上带 `-opt` 参数，验证优化后退出码一致 | ✅ |
+
+端到端测试使用 `-nostdlib` + 自定义 `_start` 入口避免 64/32 CRT 不兼容，参照 `backend/tests/rv32_e2e.sh` 的方案。
+
+触发器：PR 到 main、push 到 main/feature 分支、手动触发。
 
 ---
 
@@ -163,29 +171,31 @@ tests/
 
 ## 六、当前状态与已知限制
 
-### 6.1 模块完成度（Day 4）
+### 6.1 模块完成度（Day 4 末）
 
 | 模块 | 完成度 | 备注 |
 |------|--------|------|
-| 前端（A） | ~98% | AST 重构完成，字段与 Semantic.md 对齐，AstPrinter/Parser 配套更新 |
-| 语义（B） | ~85% | 已适配前端 AST + ASTVisitor，统一 toyc 命名空间，测试用例重组 16+16 |
-| 后端（C） | ~90% | IR+代码生成+优化器完整，文本 IR CLI 可用，寄存器复用已实现 |
-| 测试/集成（D）| ~80% | 测试基础设施完整，三模块已合并至 main，端到端管线待完全串联 |
+| 前端（A） | ~98% | Lexer+Parser+AST 完整，AstPrinter 配套完善 |
+| 语义（B） | ~85% | 逻辑完整，接口适配由D代行修复（visit签名/枚举/字段名） |
+| 后端（C） | ~90% | IR+CodeGen+Optimizer 完整，AST→IR转换和主构建集成由D代行 |
+| 测试/集成（D）| ~70% | 编译管线已串联，CI三阶段配置完成，端到端测试待通过 |
 
 ### 6.2 已解决的关键阻塞
 
-- **B 语义分析器适配**（Day 4 解决）：SemanticAnalyzer 现使用 `#include "ast/AST.h"`、实现 `toyc::ASTVisitor`、统一 `toyc` 命名空间，不再依赖独立 `semantic/AST.h`
-- **AST 统一**（Day 3 解决）：前端 AST 唯一定义在 `src/ast/`，B 独立定义已删除
-- **后端接入**（Day 3 解决）：backend 已合并到 main，CMakeLists 整合完成
+- **编译管线串联**（D 代行）：main.cpp 现已串联 Lexer→Parser→Semantic→AST→IR→Optimize→CodeGen→stdout
+- **AST→IR 转换器**（D 代行 C）：新建 `src/codegen/AstToIr.cpp`，实现 ASTVisitor 将前端 AST 转为后端 IR
+- **B 接口适配**（D 代行）：SemanticAnalyzer.h/.cpp visit 签名从指针改为 const&，字段名/枚举值/Type方法全部对齐 A 的 AST
+- **CI 三阶段**：冒烟测试 + 端到端测试 + 优化回归，使用 `-nostdlib` 解决 64/32 CRT 不兼容
+- **后端接入主构建**：CMakeLists.txt 整合 backend 源文件和 include 路径
 
 ### 6.3 待处理
 
-- [ ] 端到端管线完全串联（Lexer → Parser → Semantic → IR → CodeGen → 汇编输出）
-- [ ] 主 main.cpp 接入 SemanticAnalyzer 和 backend CodeGen
-- [ ] 全量端到端测试通过（阶乘、斐波那契、嵌套循环、递归、全局变量）
+- [ ] 端到端测试全部通过（24 用例，当前 `-nostdlib` 修复已推送，待 CI 验证）
 - [ ] `-opt` 回归测试全部通过
+- [ ] 优化效果记录（汇编行数、运行时间等数据）
 - [ ] 清理临时文件（`.idea/`, `compile_err.txt`, `*.bak`）
 - [ ] README 构建和运行命令可复现性验证
+- [ ] 实践报告补充测试结果和优化数据
 
 ---
 
