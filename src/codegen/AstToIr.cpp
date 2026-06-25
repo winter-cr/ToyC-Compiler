@@ -226,11 +226,11 @@ void AstToIr::visit(const IfStmt& node) {
 
     backend::Value cond = emitExpr(node.cond.get(), *builder_);
     builder_->emitIf(cond,
-        [this](backend::FunctionBuilder& fb) {
+        [this, &node](backend::FunctionBuilder& fb) {
             builder_ = &fb;
             if (node.then) node.then->accept(*this);
         },
-        [this](backend::FunctionBuilder& fb) {
+        [this, &node](backend::FunctionBuilder& fb) {
             builder_ = &fb;
             if (node.else_) node.else_->accept(*this);
         });
@@ -240,11 +240,11 @@ void AstToIr::visit(const WhileStmt& node) {
     if (!builder_) return;
 
     builder_->emitWhile(
-        [this](backend::FunctionBuilder& fb) -> backend::Value {
+        [this, &node](backend::FunctionBuilder& fb) -> backend::Value {
             builder_ = &fb;
             return emitExpr(node.cond.get(), fb);
         },
-        [this](backend::FunctionBuilder& fb) {
+        [this, &node](backend::FunctionBuilder& fb) {
             builder_ = &fb;
             if (node.body) node.body->accept(*this);
         });
