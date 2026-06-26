@@ -236,18 +236,6 @@ void Lexer::identifier() {
         advance();
     }
 
-    if (peek() == '-' && is_ident_start(peek_next())) {
-        advance();
-        while (is_ident_continue(peek())) {
-            advance();
-        }
-        const std::string bad = source_.substr(start, current_ - start);
-        report_error(
-            "invalid identifier '" + bad + "': identifier cannot contain '-'",
-            {token_start_line_, token_start_column_});
-        return;
-    }
-
     const std::string text = source_.substr(start, current_ - start);
     tokens_.push_back(make_token(identifier_type(text), text));
 }

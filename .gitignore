@@ -1,20 +1,58 @@
-# Build outputs
+# Build directories and generated build-system files
 build/
 out/
 bin/
 obj/
 ci-out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+install_manifest.txt
+compile_commands.json
+
+# Locally generated build scripts from CMake.
+# Keep source-level build configs such as CMakeLists.txt or a hand-written
+# Makefile trackable for the evaluation system.
+/build.ninja
+/rules.ninja
+/.ninja_deps
+/.ninja_log
+/Makefile
+
+# Compiled binaries and object/library artifacts
 *.exe
 *.out
 *.o
 *.obj
 *.so
 *.dll
+*.dylib
 *.lib
 *.a
-*.s
+*.pdb
+*.ilk
+*.exp
 
-# IDE
+# Generated compiler outputs
+*.s
+*.asm
+*.ir
+
+# Test and run artifacts
+test.exe
+test_basic.exe
+test_basic_english.exe
+test_*.exe
+*.log
+*.tmp
+*.temp
+*.err
+*.trace
+
+# IDE and editor files
 .vs/
 .vscode/
 .idea/
@@ -23,20 +61,15 @@ ci-out/
 *~
 .DS_Store
 
-# CMake
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
+# Local environment, credentials, and submission secrets
+.env
+.env.*
+*.token
+*.secret
+*.pem
+*.key
 
-# Test artifacts
-test.exe
-test_basic.exe
-test_*.exe
-
-# Logs
-*.log
-
-# Temporary
-*.tmp
-*.temp
+# Accidental Windows/application cache directories
+%SystemDrive%/
+Thumbs.db
+Desktop.ini

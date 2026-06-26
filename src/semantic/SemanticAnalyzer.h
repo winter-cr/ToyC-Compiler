@@ -59,6 +59,8 @@ private:
     void checkExpr(const Expr* expr);
     std::optional<int> evaluateConstExpr(Expr* expr);
     bool checkReturnPaths(const Block* block, bool expectReturn);
+    bool stmtGuaranteesReturn(const Stmt* stmt, bool expectReturn);
+    bool exprIsConstantNonZero(const Expr* expr);
     std::string errorMessage(SemanticErrorCode code);
 };
 

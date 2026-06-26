@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace toyc::backend {
 namespace {
@@ -22,7 +24,7 @@ struct ValueKeyHash {
     }
 };
 
-using UseCounts = std::unordered_map<ValueKey, std::size_t, ValueKeyHash>;
+using LiveValues = std::unordered_set<ValueKey, ValueKeyHash>;
 
 std::optional<std::int32_t> foldUnary(UnaryOp op, std::int32_t value) {
     if (op == UnaryOp::Negate) {
@@ -75,13 +77,20 @@ std::optional<std::int32_t> foldBinary(BinaryOp op, std::int32_t left,
     return std::nullopt;
 }
 
-void addUse(const std::optional<Value>& value, UseCounts& uses) {
+void addLiveUse(const std::optional<Value>& value, LiveValues& live) {
     if (value && (value->kind == ValueKind::VirtualRegister ||
                   value->kind == ValueKind::Local)) {
-        ++uses[ValueKey{value->kind, value->id}];
+        live.insert(ValueKey{value->kind, value->id});
     }
 }
 
+void addInstructionUses(const Instruction& instruction, LiveValues& live) {
+    addLiveUse(instruction.left, live);
+    addLiveUse(instruction.right, live);
+    for (const auto& argument : instruction.arguments) {
+        addLiveUse(argument, live);
+    }
+}
 bool isPureTemporaryDefinition(const Instruction& instruction) {
     if (!instruction.destination ||
         instruction.destination->kind != ValueKind::VirtualRegister) {
@@ -132,31 +141,26 @@ void optimizeFunction(Function& function, const OptimizationOptions& options) {
         return;
     }
 
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        UseCounts uses;
-        for (const auto& instruction : function.instructions) {
-            addUse(instruction.left, uses);
-            addUse(instruction.right, uses);
-            for (const auto& argument : instruction.arguments) {
-                addUse(argument, uses);
-            }
-        }
+    LiveValues live;
+    std::vector<Instruction> kept_reversed;
+    kept_reversed.reserve(function.instructions.size());
 
-        std::vector<Instruction> kept;
-        kept.reserve(function.instructions.size());
-        for (const auto& instruction : function.instructions) {
-            if (isPureTemporaryDefinition(instruction) &&
-                uses[ValueKey{instruction.destination->kind,
-                              instruction.destination->id}] == 0) {
-                changed = true;
+    for (auto it = function.instructions.rbegin();
+         it != function.instructions.rend(); ++it) {
+        const auto& instruction = *it;
+        if (isPureTemporaryDefinition(instruction)) {
+            const ValueKey destination{instruction.destination->kind,
+                                       instruction.destination->id};
+            if (!live.count(destination)) {
                 continue;
             }
-            kept.push_back(instruction);
+            live.erase(destination);
         }
-        function.instructions = std::move(kept);
+        addInstructionUses(instruction, live);
+        kept_reversed.push_back(instruction);
     }
+
+    function.instructions.assign(kept_reversed.rbegin(), kept_reversed.rend());
 }
 
 } // namespace

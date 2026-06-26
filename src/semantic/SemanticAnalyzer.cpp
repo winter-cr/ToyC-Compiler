@@ -119,7 +119,7 @@ std::string SemanticAnalyzer::errorMessage(SemanticErrorCode code) {
 }
 
 // =====================================================================
-// Visitor implementations â€” all take const& per ASTVisitor interface
+// Visitor implementations ¡ª all take const& per ASTVisitor interface
 // =====================================================================
 
 void SemanticAnalyzer::visit(const CompUnit& node) {
@@ -450,44 +450,44 @@ void SemanticAnalyzer::visit(const FuncCall& node) {
 bool SemanticAnalyzer::checkReturnPaths(const Block* block, bool expectReturn) {
     if (!block) return !expectReturn;
 
-    bool hasReturn = false;
     for (auto& stmt : block->statements) {
         if (!stmt) continue;
-
-        if (auto* ret = dynamic_cast<const ReturnStmt*>(stmt.get())) {
-            if (expectReturn && ret->value) {
-                hasReturn = true;
-            } else if (!expectReturn && !ret->value) {
-                hasReturn = true;
-            }
-        } else if (auto* ifStmt = dynamic_cast<const IfStmt*>(stmt.get())) {
-            bool thenHasReturn = false;
-            bool elseHasReturn = false;
-
-            if (ifStmt->then) {
-                if (auto* thenBlock = dynamic_cast<const Block*>(ifStmt->then.get())) {
-                    thenHasReturn = checkReturnPaths(thenBlock, expectReturn);
-                } else if (dynamic_cast<const ReturnStmt*>(ifStmt->then.get())) {
-                    thenHasReturn = true;
-                }
-            }
-
-            if (ifStmt->else_) {
-                if (auto* elseBlock = dynamic_cast<const Block*>(ifStmt->else_.get())) {
-                    elseHasReturn = checkReturnPaths(elseBlock, expectReturn);
-                } else if (dynamic_cast<const ReturnStmt*>(ifStmt->else_.get())) {
-                    elseHasReturn = true;
-                }
-            } else {
-                elseHasReturn = false;
-            }
-
-            if (thenHasReturn && elseHasReturn) {
-                hasReturn = true;
-            }
+        if (stmtGuaranteesReturn(stmt.get(), expectReturn)) {
+            return true;
         }
     }
-    return hasReturn;
+    return false;
 }
 
+bool SemanticAnalyzer::stmtGuaranteesReturn(const Stmt* stmt, bool expectReturn) {
+    if (!stmt) return false;
+
+    if (auto* ret = dynamic_cast<const ReturnStmt*>(stmt)) {
+        return expectReturn ? ret->value != nullptr : ret->value == nullptr;
+    }
+
+    if (auto* block = dynamic_cast<const Block*>(stmt)) {
+        return checkReturnPaths(block, expectReturn);
+    }
+
+    if (auto* ifStmt = dynamic_cast<const IfStmt*>(stmt)) {
+        return ifStmt->else_ &&
+               stmtGuaranteesReturn(ifStmt->then.get(), expectReturn) &&
+               stmtGuaranteesReturn(ifStmt->else_.get(), expectReturn);
+    }
+
+    if (auto* whileStmt = dynamic_cast<const WhileStmt*>(stmt)) {
+        return exprIsConstantNonZero(whileStmt->cond.get()) &&
+               stmtGuaranteesReturn(whileStmt->body.get(), expectReturn);
+    }
+
+    return false;
+}
+
+bool SemanticAnalyzer::exprIsConstantNonZero(const Expr* expr) {
+    if (!expr) return false;
+    auto* mutableExpr = const_cast<Expr*>(expr);
+    auto value = evaluateConstExpr(mutableExpr);
+    return value.has_value() && value.value() != 0;
+}
 } // namespace toyc

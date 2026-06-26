@@ -37,7 +37,7 @@ std::optional<std::int32_t> parseInteger(std::string_view text) {
 
 std::optional<std::uint32_t> parseId(std::string_view text,
                                      std::string_view prefix) {
-    if (!text.starts_with(prefix)) {
+    if (text.size() < prefix.size() || text.substr(0, prefix.size()) != prefix) {
         return std::nullopt;
     }
     std::uint32_t value = 0;
