@@ -238,54 +238,187 @@ void storeValue(std::ostringstream& output, const Value& destination,
     }
 }
 
-void emitBinary(std::ostringstream& output, BinaryOp op) {
+bool positivePowerOfTwo(std::int32_t value, int& shift) {
+    if (value <= 0) return false;
+    const auto unsigned_value = static_cast<std::uint32_t>(value);
+    if ((unsigned_value & (unsigned_value - 1U)) != 0U) return false;
+    shift = 0;
+    while ((1U << shift) != unsigned_value) ++shift;
+    return true;
+}
+
+void emitBinaryTo(std::ostringstream& output, const std::string& destination,
+                  BinaryOp op, const Value& left, const Value& right,
+                  const SlotMap& slots, const RegisterMap& registers) {
+    const auto load_left = [&]() {
+        if (const auto reg = assignedRegister(left, registers)) return *reg;
+        loadValue(output, left, "t0", slots, registers);
+        return std::string{"t0"};
+    };
+    const auto load_right = [&]() {
+        if (const auto reg = assignedRegister(right, registers)) return *reg;
+        loadValue(output, right, "t1", slots, registers);
+        return std::string{"t1"};
+    };
+
+    if (op == BinaryOp::Add) {
+        if (right.kind == ValueKind::Immediate && fitsImmediate12(right.immediate)) {
+            const auto source = load_left();
+            output << "  addi " << destination << ", " << source
+                   << ", " << right.immediate << "\n";
+            return;
+        }
+        if (left.kind == ValueKind::Immediate && fitsImmediate12(left.immediate)) {
+            const auto source = load_right();
+            output << "  addi " << destination << ", " << source
+                   << ", " << left.immediate << "\n";
+            return;
+        }
+    }
+
+    if (op == BinaryOp::Subtract && right.kind == ValueKind::Immediate) {
+        const auto negated = static_cast<std::int64_t>(-right.immediate);
+        if (negated >= -2048 && negated <= 2047) {
+            const auto source = load_left();
+            output << "  addi " << destination << ", " << source
+                   << ", " << negated << "\n";
+            return;
+        }
+    }
+
+    if (op == BinaryOp::Less && right.kind == ValueKind::Immediate &&
+        fitsImmediate12(right.immediate)) {
+        const auto source = load_left();
+        output << "  slti " << destination << ", " << source
+               << ", " << right.immediate << "\n";
+        return;
+    }
+
+    if ((op == BinaryOp::Equal || op == BinaryOp::NotEqual) &&
+        right.kind == ValueKind::Immediate && right.immediate == 0) {
+        const auto source = load_left();
+        output << "  " << (op == BinaryOp::Equal ? "seqz " : "snez ")
+               << destination << ", " << source << "\n";
+        return;
+    }
+    if ((op == BinaryOp::Equal || op == BinaryOp::NotEqual) &&
+        left.kind == ValueKind::Immediate && left.immediate == 0) {
+        const auto source = load_right();
+        output << "  " << (op == BinaryOp::Equal ? "seqz " : "snez ")
+               << destination << ", " << source << "\n";
+        return;
+    }
+
+    int shift = 0;
+    if (op == BinaryOp::Multiply && right.kind == ValueKind::Immediate &&
+        positivePowerOfTwo(right.immediate, shift)) {
+        const auto source = load_left();
+        output << "  slli " << destination << ", " << source
+               << ", " << shift << "\n";
+        return;
+    }
+    if (op == BinaryOp::Multiply && left.kind == ValueKind::Immediate &&
+        positivePowerOfTwo(left.immediate, shift)) {
+        const auto source = load_right();
+        output << "  slli " << destination << ", " << source
+               << ", " << shift << "\n";
+        return;
+    }
+
+    const auto left_reg = load_left();
+    const auto right_reg = load_right();
     switch (op) {
     case BinaryOp::Add:
-        output << "  add t2, t0, t1\n";
+        output << "  add " << destination << ", " << left_reg << ", " << right_reg << "\n";
         break;
     case BinaryOp::Subtract:
-        output << "  sub t2, t0, t1\n";
+        output << "  sub " << destination << ", " << left_reg << ", " << right_reg << "\n";
         break;
     case BinaryOp::Multiply:
-        output << "  mul t2, t0, t1\n";
+        output << "  mul " << destination << ", " << left_reg << ", " << right_reg << "\n";
         break;
     case BinaryOp::Divide:
-        output << "  div t2, t0, t1\n";
+        output << "  div " << destination << ", " << left_reg << ", " << right_reg << "\n";
         break;
     case BinaryOp::Remainder:
-        output << "  rem t2, t0, t1\n";
+        output << "  rem " << destination << ", " << left_reg << ", " << right_reg << "\n";
         break;
     case BinaryOp::Equal:
-        output << "  xor t2, t0, t1\n"
-               << "  seqz t2, t2\n";
+        output << "  xor " << destination << ", " << left_reg << ", " << right_reg << "\n"
+               << "  seqz " << destination << ", " << destination << "\n";
         break;
     case BinaryOp::NotEqual:
-        output << "  xor t2, t0, t1\n"
-               << "  snez t2, t2\n";
+        output << "  xor " << destination << ", " << left_reg << ", " << right_reg << "\n"
+               << "  snez " << destination << ", " << destination << "\n";
         break;
     case BinaryOp::Less:
-        output << "  slt t2, t0, t1\n";
+        output << "  slt " << destination << ", " << left_reg << ", " << right_reg << "\n";
         break;
     case BinaryOp::LessEqual:
-        output << "  slt t2, t1, t0\n"
-               << "  xori t2, t2, 1\n";
+        output << "  slt " << destination << ", " << right_reg << ", " << left_reg << "\n"
+               << "  xori " << destination << ", " << destination << ", 1\n";
         break;
     case BinaryOp::Greater:
-        output << "  slt t2, t1, t0\n";
+        output << "  slt " << destination << ", " << right_reg << ", " << left_reg << "\n";
         break;
     case BinaryOp::GreaterEqual:
-        output << "  slt t2, t0, t1\n"
-               << "  xori t2, t2, 1\n";
+        output << "  slt " << destination << ", " << left_reg << ", " << right_reg << "\n"
+               << "  xori " << destination << ", " << destination << ", 1\n";
         break;
     }
 }
+bool isComparison(BinaryOp op) {
+    return op == BinaryOp::Equal || op == BinaryOp::NotEqual ||
+           op == BinaryOp::Less || op == BinaryOp::LessEqual ||
+           op == BinaryOp::Greater || op == BinaryOp::GreaterEqual;
+}
 
+void emitCompareBranch(std::ostringstream& output, BinaryOp op,
+                       const Value& left, const Value& right,
+                       const std::string& true_label,
+                       const std::string& false_label,
+                       const SlotMap& slots, const RegisterMap& registers) {
+    const auto left_reg = assignedRegister(left, registers);
+    const auto right_reg = assignedRegister(right, registers);
+    const auto lhs = left_reg ? *left_reg : std::string{"t0"};
+    const auto rhs = right_reg ? *right_reg : std::string{"t1"};
+    if (!left_reg) {
+        loadValue(output, left, "t0", slots, registers);
+    }
+    if (!right_reg) {
+        loadValue(output, right, "t1", slots, registers);
+    }
+    switch (op) {
+    case BinaryOp::Equal:
+        output << "  beq " << lhs << ", " << rhs << ", " << true_label << "\n";
+        break;
+    case BinaryOp::NotEqual:
+        output << "  bne " << lhs << ", " << rhs << ", " << true_label << "\n";
+        break;
+    case BinaryOp::Less:
+        output << "  blt " << lhs << ", " << rhs << ", " << true_label << "\n";
+        break;
+    case BinaryOp::LessEqual:
+        output << "  bge " << rhs << ", " << lhs << ", " << true_label << "\n";
+        break;
+    case BinaryOp::Greater:
+        output << "  blt " << rhs << ", " << lhs << ", " << true_label << "\n";
+        break;
+    case BinaryOp::GreaterEqual:
+        output << "  bge " << lhs << ", " << rhs << ", " << true_label << "\n";
+        break;
+    default:
+        break;
+    }
+    output << "  j " << false_label << "\n";
+}
 void emitFunction(std::ostringstream& output, const Function& function,
                   const CodegenOptions& options) {
     std::int32_t frame_size = 0;
     const auto registers = assignRegisters(function);
     const auto slots = assignSlots(function, registers, frame_size);
     const auto epilogue = ".L_" + function.name + "_epilogue";
+    const auto tail_entry = ".L_" + function.name + "_tail_entry";
 
     output << "\n  .text\n"
            << "  .align 2\n"
@@ -326,7 +459,9 @@ void emitFunction(std::ostringstream& output, const Function& function,
             storeValue(output, parameter, "t0", slots, registers);
         }
     }
-    for (const auto& instruction : function.instructions) {
+    output << tail_entry << ":\n";
+    for (std::size_t pc = 0; pc < function.instructions.size(); ++pc) {
+        const auto& instruction = function.instructions[pc];
         switch (instruction.kind) {
         case InstructionKind::Label:
             output << instruction.label << ":\n";
@@ -372,13 +507,35 @@ void emitFunction(std::ostringstream& output, const Function& function,
                        registers);
             break;
         case InstructionKind::Binary:
-            loadValue(output, *instruction.left, "t0", slots, registers);
-            loadValue(output, *instruction.right, "t1", slots, registers);
-            emitBinary(output, *instruction.binary_op);
-            storeValue(output, *instruction.destination, "t2", slots,
-                       registers);
-            break;
-        case InstructionKind::Jump:
+            if (pc + 1 < function.instructions.size()) {
+                const auto& next = function.instructions[pc + 1];
+                if (next.kind == InstructionKind::Branch && next.left &&
+                    instruction.destination &&
+                    next.left->kind == instruction.destination->kind &&
+                    next.left->id == instruction.destination->id &&
+                    isComparison(*instruction.binary_op)) {
+                    emitCompareBranch(output, *instruction.binary_op,
+                                      *instruction.left, *instruction.right,
+                                      next.label, next.false_label,
+                                      slots, registers);
+                    ++pc;
+                    break;
+                }
+            }
+            if (const auto destination_register =
+                    assignedRegister(*instruction.destination, registers)) {
+                emitBinaryTo(output, *destination_register,
+                             *instruction.binary_op,
+                             *instruction.left, *instruction.right,
+                             slots, registers);
+            } else {
+                emitBinaryTo(output, "t2", *instruction.binary_op,
+                             *instruction.left, *instruction.right,
+                             slots, registers);
+                storeValue(output, *instruction.destination, "t2", slots,
+                           registers);
+            }
+            break;        case InstructionKind::Jump:
             output << "  j " << instruction.label << "\n";
             break;
         case InstructionKind::Branch: {
@@ -392,6 +549,30 @@ void emitFunction(std::ostringstream& output, const Function& function,
                    << "  j " << instruction.false_label << "\n";
             break;
         }        case InstructionKind::Call: {
+            if (instruction.callee == function.name && instruction.destination &&
+                instruction.arguments.size() == function.parameters.size() &&
+                instruction.arguments.size() <= 4 &&
+                pc + 1 < function.instructions.size()) {
+                const auto& next = function.instructions[pc + 1];
+                if (next.kind == InstructionKind::Return && next.left &&
+                    next.left->kind == instruction.destination->kind &&
+                    next.left->id == instruction.destination->id) {
+                    static const char* scratch[] = {"t0", "t1", "t2", "t3"};
+                    for (std::size_t index = 0; index < instruction.arguments.size(); ++index) {
+                        loadValue(output, instruction.arguments[index], scratch[index],
+                                  slots, registers);
+                    }
+                    for (std::size_t index = 0; index < instruction.arguments.size(); ++index) {
+                        const auto parameter = Value::local(
+                            function.parameters[index].local_id,
+                            function.parameters[index].name);
+                        storeValue(output, parameter, scratch[index], slots, registers);
+                    }
+                    output << "  j " << tail_entry << "\n";
+                    ++pc;
+                    break;
+                }
+            }
             const auto extra_count =
                 instruction.arguments.size() > 8
                     ? instruction.arguments.size() - 8
@@ -401,11 +582,24 @@ void emitFunction(std::ostringstream& output, const Function& function,
             emitSpAdjustment(output, -outgoing_size);
 
             for (std::size_t index = 0; index < instruction.arguments.size(); ++index) {
-                loadValue(output, instruction.arguments[index], "t0", slots,
-                          registers);
                 if (index < 8) {
-                    output << "  mv a" << index << ", t0\n";
+                    const auto argument_register = "a" + std::to_string(index);
+                    if (instruction.arguments[index].kind == ValueKind::Immediate) {
+                        output << "  li " << argument_register << ", "
+                               << instruction.arguments[index].immediate << "\n";
+                    } else if (const auto source_register =
+                                   assignedRegister(instruction.arguments[index], registers)) {
+                        if (*source_register != argument_register) {
+                            output << "  mv " << argument_register << ", "
+                                   << *source_register << "\n";
+                        }
+                    } else {
+                        loadValue(output, instruction.arguments[index],
+                                  argument_register, slots, registers);
+                    }
                 } else {
+                    loadValue(output, instruction.arguments[index], "t0", slots,
+                              registers);
                     const auto offset =
                         static_cast<std::int32_t>((index - 8) * 4);
                     if (fitsImmediate12(offset)) {
@@ -416,8 +610,7 @@ void emitFunction(std::ostringstream& output, const Function& function,
                                << "  sw t0, 0(t6)\n";
                     }
                 }
-            }
-            output << "  call " << instruction.callee << "\n";
+            }            output << "  call " << instruction.callee << "\n";
             emitSpAdjustment(output, outgoing_size);
             if (instruction.destination) {
                 storeValue(output, *instruction.destination, "a0", slots,

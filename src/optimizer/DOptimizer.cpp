@@ -28,9 +28,9 @@ struct SlotKeyHash {
     }
 };
 
-// ---- Jump threading: redirect j L1 (where L1: j L2) → j L2 ----
+// ---- Jump threading: redirect j L1 (where L1: j L2) 鈫?j L2 ----
 void threadJumps(std::vector<Instruction>& instrs) {
-    // Build label → instruction index map
+    // Build label 鈫?instruction index map
     std::unordered_map<std::string, size_t> label_index;
     for (size_t i = 0; i < instrs.size(); ++i) {
         if (instrs[i].kind == InstructionKind::Label) {
@@ -38,9 +38,9 @@ void threadJumps(std::vector<Instruction>& instrs) {
         }
     }
 
-    // Build jump target → target-of-target map.
+    // Build jump target 鈫?target-of-target map.
     // Only thread when a label is immediately followed by a single jump
-    // (i.e., the label is just an alias — no real code between).
+    // (i.e., the label is just an alias 鈥?no real code between).
     std::unordered_map<std::string, std::string> jump_redirect;
     for (size_t i = 0; i + 1 < instrs.size(); ++i) {
         if (instrs[i].kind == InstructionKind::Label &&
@@ -83,14 +83,14 @@ void removeDeadJumps(std::vector<Instruction>& instrs) {
         if (instrs[i].kind == InstructionKind::Jump && i + 1 < instrs.size() &&
             instrs[i + 1].kind == InstructionKind::Label &&
             instrs[i].label == instrs[i + 1].label) {
-            // Skip this jump — it targets the next instruction
+            // Skip this jump 鈥?it targets the next instruction
             continue;
         }
         // Also skip j L where L immediately follows a falling-through branch
         if (instrs[i].kind == InstructionKind::Jump && i > 0 &&
             instrs[i - 1].kind == InstructionKind::Branch) {
             // Branch already handles the false case; jump is for the other path.
-            // Don't remove — it's needed.
+            // Don't remove 鈥?it's needed.
         }
         result.push_back(std::move(instrs[i]));
     }
@@ -124,12 +124,11 @@ void eliminateRedundantCopies(std::vector<Instruction>& instrs) {
         if (instr.kind == InstructionKind::Copy && instr.destination &&
             instr.left) {
             SlotKey dst{instr.destination->kind, instr.destination->id};
-            SlotKey src{instr.left->kind, instr.left->id};
 
             // Check if previous copy to same dest can be eliminated
             auto it = last_copy.find(dst);
             if (it != last_copy.end() && !used_since_copy.count(dst)) {
-                // Previous copy was never read — remove it
+                // Previous copy was never read 鈥?remove it
                 // Mark it as NOP by turning into a Jump to self (will be removed)
                 // Actually, just mark the source as unused for this iteration
             }
@@ -199,92 +198,6 @@ std::string removeSelfMoves(const std::string& asm_code) {
     return output.str();
 }
 
-// Simplify "li tX, 0; add tZ, tY, tX" → "mv tZ, tY"
-// and "li tX, 1; mul tZ, tY, tX" → "mv tZ, tY"
-std::string simplifyAddMulWithZeroOne(const std::string& asm_code) {
-    std::istringstream input(asm_code);
-    std::vector<std::string> lines;
-    std::string line;
-    while (std::getline(input, line)) {
-        lines.push_back(line);
-    }
-
-    std::vector<bool> deleted(lines.size(), false);
-    for (size_t i = 0; i + 1 < lines.size(); ++i) {
-        if (deleted[i]) continue;
-
-        // "  li reg, 0" followed by "  add/sub dst, src, reg" → "  mv dst, src"
-        // (adding/subtracting zero is identity)
-        const auto& li_line = lines[i];
-        if (li_line.size() > 7 && li_line.substr(0, 5) == "  li ") {
-            auto comma = li_line.find(',', 5);
-            if (comma == std::string::npos) continue;
-            std::string reg = li_line.substr(5, comma - 5);
-            std::string imm_str = li_line.substr(comma + 2);
-            // Trim
-            reg.erase(0, reg.find_first_not_of(' '));
-            reg.erase(reg.find_last_not_of(' ') + 1);
-            imm_str.erase(0, imm_str.find_first_not_of(' '));
-            imm_str.erase(imm_str.find_last_not_of(' ') + 1);
-
-            if (imm_str != "0" && imm_str != "1") continue;
-
-            // Look at next line
-            for (size_t j = i + 1; j < lines.size() && j < i + 3; ++j) {
-                if (deleted[j]) continue;
-                const auto& next = lines[j];
-                if (next.size() < 7) continue;
-                std::string op_prefix = next.substr(0, 7);
-                if (op_prefix == "  add " || op_prefix == "  sub ") {
-                    auto pos = next.find(reg);
-                    if (pos != std::string::npos && pos > 6) {
-                        // reg is used as operand; if imm=0, it's identity for add/sub
-                        if (imm_str == "0") {
-                            // Replace add/sub with mv: extract dst and other src
-                            // "  add tZ, tY, reg" where reg=zero → "  mv tZ, tY"
-                            std::string dst, src1, src2;
-                            std::istringstream ns(next.substr(5));
-                            ns >> dst;
-                            // dst ends with comma
-                            if (!dst.empty() && dst.back() == ',') dst.pop_back();
-                            ns >> src1;
-                            if (!src1.empty() && src1.back() == ',') src1.pop_back();
-                            ns >> src2;
-                            std::string other = (src1 == reg) ? src2 : src1;
-                            lines[j] = "  mv " + dst + ", " + other;
-                            deleted[i] = true;
-                            break;
-                        }
-                    }
-                } else if (op_prefix == "  mul ") {
-                    auto pos = next.find(reg);
-                    if (pos != std::string::npos && pos > 6 && imm_str == "1") {
-                        // mul with 1 is identity
-                        std::string dst, src1, src2;
-                        std::istringstream ns(next.substr(5));
-                        ns >> dst;
-                        if (!dst.empty() && dst.back() == ',') dst.pop_back();
-                        ns >> src1;
-                        if (!src1.empty() && src1.back() == ',') src1.pop_back();
-                        ns >> src2;
-                        std::string other = (src1 == reg) ? src2 : src1;
-                        lines[j] = "  mv " + dst + ", " + other;
-                        deleted[i] = true;
-                        break;
-                    }
-                }
-                break; // only check the very next real instruction
-            }
-        }
-    }
-
-    std::ostringstream output;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (!deleted[i]) output << lines[i] << '\n';
-    }
-    return output.str();
-}
-
 // Remove "j label; label:" (dead jump to immediately following label)
 std::string removeDeadJumpsAsm(const std::string& asm_code) {
     std::istringstream input(asm_code);
@@ -332,8 +245,6 @@ std::string DOptimizer::optimizeAssembly(const std::string& assembly) {
     std::string result = assembly;
     result = removeSelfMoves(result);
     result = removeDeadJumpsAsm(result);
-    // simplifyAddMulWithZeroOne disabled: sub with zero-on-left is not
-    // identity (0 - x = -x ≠ x), and local peephole can't verify liveness.
     return result;
 }
 
