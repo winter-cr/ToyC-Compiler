@@ -13,16 +13,15 @@ Testing/
 install_manifest.txt
 compile_commands.json
 
-# Locally generated build scripts from CMake.
-# Keep source-level build configs such as CMakeLists.txt or a hand-written
-# Makefile trackable for the evaluation system.
+# Locally generated Ninja files from CMake.
+# Source-level build configs such as CMakeLists.txt and Makefile stay trackable.
 /build.ninja
 /rules.ninja
 /.ninja_deps
 /.ninja_log
-/Makefile
 
 # Compiled binaries and object/library artifacts
+/toyc
 *.exe
 *.out
 *.o

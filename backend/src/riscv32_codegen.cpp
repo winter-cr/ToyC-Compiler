@@ -54,13 +54,14 @@ void collectValue(const std::optional<Value>& value, SlotMap& slots,
     }
 }
 
-void collectVirtualRegister(const std::optional<Value>& value,
-                            RegisterMap& registers) {
+void collectRegisterCandidate(const std::optional<Value>& value,
+                              RegisterMap& registers) {
     static const std::vector<std::string> available{
         "s1", "s2", "s3", "s4", "s5", "s6",
         "s7", "s8", "s9", "s10", "s11",
     };
-    if (!value || value->kind != ValueKind::VirtualRegister) {
+    if (!value || (value->kind != ValueKind::VirtualRegister &&
+                   value->kind != ValueKind::Local)) {
         return;
     }
     const SlotKey key{value->kind, value->id};
@@ -68,15 +69,14 @@ void collectVirtualRegister(const std::optional<Value>& value,
         registers.emplace(key, available[registers.size()]);
     }
 }
-
 RegisterMap assignRegisters(const Function& function) {
     RegisterMap registers;
     for (const auto& instruction : function.instructions) {
-        collectVirtualRegister(instruction.destination, registers);
-        collectVirtualRegister(instruction.left, registers);
-        collectVirtualRegister(instruction.right, registers);
+        collectRegisterCandidate(instruction.destination, registers);
+        collectRegisterCandidate(instruction.left, registers);
+        collectRegisterCandidate(instruction.right, registers);
         for (const auto& argument : instruction.arguments) {
-            collectVirtualRegister(argument, registers);
+            collectRegisterCandidate(argument, registers);
         }
     }
     return registers;
@@ -115,6 +115,18 @@ std::int32_t slotOffset(const Value& value, const SlotMap& slots) {
     return iterator->second;
 }
 
+std::optional<std::string> assignedRegister(const Value& value,
+                                            const RegisterMap& registers) {
+    if (value.kind != ValueKind::VirtualRegister &&
+        value.kind != ValueKind::Local) {
+        return std::nullopt;
+    }
+    const auto iterator = registers.find(SlotKey{value.kind, value.id});
+    if (iterator == registers.end()) {
+        return std::nullopt;
+    }
+    return iterator->second;
+}
 void emitStackLoad(std::ostringstream& output, const std::string& destination,
                    std::int32_t offset) {
     if (fitsImmediate12(offset)) {
@@ -169,10 +181,19 @@ void loadValue(std::ostringstream& output, const Value& value,
         emitStackLoad(output, destination, slotOffset(value, slots));
         break;
     }
-    case ValueKind::Local:
+    case ValueKind::Local: {
+        const auto iterator =
+            registers.find(SlotKey{value.kind, value.id});
+        if (iterator != registers.end()) {
+            if (iterator->second != destination) {
+                output << "  mv " << destination << ", " << iterator->second
+                       << "\n";
+            }
+            break;
+        }
         emitStackLoad(output, destination, slotOffset(value, slots));
         break;
-    case ValueKind::Global:
+    }    case ValueKind::Global:
         output << "  la t6, " << value.name << "\n"
                << "  lw " << destination << ", 0(t6)\n";
         break;
@@ -196,10 +217,19 @@ void storeValue(std::ostringstream& output, const Value& destination,
         emitStackStore(output, source, slotOffset(destination, slots));
         break;
     }
-    case ValueKind::Local:
+    case ValueKind::Local: {
+        const auto iterator =
+            registers.find(SlotKey{destination.kind, destination.id});
+        if (iterator != registers.end()) {
+            if (iterator->second != source) {
+                output << "  mv " << iterator->second << ", " << source
+                       << "\n";
+            }
+            break;
+        }
         emitStackStore(output, source, slotOffset(destination, slots));
         break;
-    case ValueKind::Global:
+    }    case ValueKind::Global:
         output << "  la t6, " << destination.name << "\n"
                << "  sw " << source << ", 0(t6)\n";
         break;
@@ -282,8 +312,8 @@ void emitFunction(std::ostringstream& output, const Function& function,
             Value::local(function.parameters[index].local_id,
                          function.parameters[index].name);
         if (index < 8) {
-            emitStackStore(output, "a" + std::to_string(index),
-                           slotOffset(parameter, slots));
+            storeValue(output, parameter, "a" + std::to_string(index), slots,
+                       registers);
         } else {
             const auto incoming_offset = static_cast<std::int32_t>((index - 8) * 4);
             if (fitsImmediate12(incoming_offset)) {
@@ -293,21 +323,45 @@ void emitFunction(std::ostringstream& output, const Function& function,
                        << "  add t6, s0, t6\n"
                        << "  lw t0, 0(t6)\n";
             }
-            emitStackStore(output, "t0", slotOffset(parameter, slots));
+            storeValue(output, parameter, "t0", slots, registers);
         }
     }
-
     for (const auto& instruction : function.instructions) {
         switch (instruction.kind) {
         case InstructionKind::Label:
             output << instruction.label << ":\n";
             break;
-        case InstructionKind::Copy:
-            loadValue(output, *instruction.left, "t0", slots, registers);
-            storeValue(output, *instruction.destination, "t0", slots,
-                       registers);
+        case InstructionKind::Copy: {
+            const auto destination_register =
+                assignedRegister(*instruction.destination, registers);
+            const auto source_register = assignedRegister(*instruction.left,
+                                                          registers);
+            if (destination_register) {
+                if (instruction.left->kind == ValueKind::Immediate) {
+                    output << "  li " << *destination_register << ", "
+                           << instruction.left->immediate << "\n";
+                } else if (source_register) {
+                    if (*destination_register != *source_register) {
+                        output << "  mv " << *destination_register << ", "
+                               << *source_register << "\n";
+                    }
+                } else if (instruction.left->kind == ValueKind::Global) {
+                    output << "  la t6, " << instruction.left->name << "\n"
+                           << "  lw " << *destination_register << ", 0(t6)\n";
+                } else {
+                    emitStackLoad(output, *destination_register,
+                                  slotOffset(*instruction.left, slots));
+                }
+            } else if (source_register) {
+                storeValue(output, *instruction.destination, *source_register,
+                           slots, registers);
+            } else {
+                loadValue(output, *instruction.left, "t0", slots, registers);
+                storeValue(output, *instruction.destination, "t0", slots,
+                           registers);
+            }
             break;
-        case InstructionKind::Unary:
+        }        case InstructionKind::Unary:
             loadValue(output, *instruction.left, "t0", slots, registers);
             if (*instruction.unary_op == UnaryOp::Negate) {
                 output << "  neg t2, t0\n";
@@ -327,12 +381,17 @@ void emitFunction(std::ostringstream& output, const Function& function,
         case InstructionKind::Jump:
             output << "  j " << instruction.label << "\n";
             break;
-        case InstructionKind::Branch:
-            loadValue(output, *instruction.left, "t0", slots, registers);
-            output << "  bnez t0, " << instruction.label << "\n"
+        case InstructionKind::Branch: {
+            const auto condition_register = assignedRegister(*instruction.left,
+                                                             registers);
+            const auto condition = condition_register ? *condition_register : "t0";
+            if (!condition_register) {
+                loadValue(output, *instruction.left, "t0", slots, registers);
+            }
+            output << "  bnez " << condition << ", " << instruction.label << "\n"
                    << "  j " << instruction.false_label << "\n";
             break;
-        case InstructionKind::Call: {
+        }        case InstructionKind::Call: {
             const auto extra_count =
                 instruction.arguments.size() > 8
                     ? instruction.arguments.size() - 8
@@ -368,7 +427,14 @@ void emitFunction(std::ostringstream& output, const Function& function,
         }
         case InstructionKind::Return:
             if (instruction.left) {
-                loadValue(output, *instruction.left, "a0", slots, registers);
+                if (const auto source_register =
+                        assignedRegister(*instruction.left, registers)) {
+                    if (*source_register != "a0") {
+                        output << "  mv a0, " << *source_register << "\n";
+                    }
+                } else {
+                    loadValue(output, *instruction.left, "a0", slots, registers);
+                }
             }
             output << "  j " << epilogue << "\n";
             break;
