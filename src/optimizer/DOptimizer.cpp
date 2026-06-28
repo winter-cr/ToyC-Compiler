@@ -188,7 +188,7 @@ void computeDefUse(std::vector<BasicBlock>& blocks,
             case InstructionKind::Branch:
                 record_use(inst.left); break;
             case InstructionKind::Call:
-                for (const auto& arg : inst.arguments) record_use(arg); break;
+                for (const auto& arg : inst.arguments) { record_use(arg); } break;
             case InstructionKind::Return:
                 record_use(inst.left); break;
             default: break;
@@ -289,7 +289,7 @@ void eliminateRedundantCopies(std::vector<Instruction>& instrs) {
             case InstructionKind::Branch:
                 add_use(inst.left); break;
             case InstructionKind::Call:
-                for (const auto& arg : inst.arguments) add_use(arg); break;
+                for (const auto& arg : inst.arguments) { add_use(arg); } break;
             case InstructionKind::Return:
                 add_use(inst.left); break;
             default: break;
@@ -367,7 +367,10 @@ void eliminateRedundantCopies(std::vector<Instruction>& instrs) {
             case InstructionKind::Binary:
                 replace(later.left); replace(later.right); break;
             case InstructionKind::Call:
-                for (auto& arg : later.arguments) replace(arg); break;
+                for (auto& arg : later.arguments) {
+                    if (valueMatchesSlot(arg, dst_key)) arg = src_val;
+                }
+                break;
             default: break;
             }
 
